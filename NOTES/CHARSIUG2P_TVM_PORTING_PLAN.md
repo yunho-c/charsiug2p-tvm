@@ -40,6 +40,7 @@ flowchart LR
 - TVM compile path: implemented in `python/src/charsiug2p_tvm/tvm_compile.py` with `charsiug2p-tvm compile --output-dir ...` generating encoder/decoder artifacts.
 - Default compile output directory: `dist/tvm/<checkpoint_sanitized>/<b{batch}_in{max_input}_out{max_output}>/<target>` (checkpoint uses `/` -> `_`) when `--output-dir` is omitted.
 - TVM runtime path: implemented in `python/src/charsiug2p_tvm/tvm_runtime.py` with `charsiug2p-tvm run-tvm` loading compiled encoder/decoder artifacts and performing greedy decode.
+- Verification: `charsiug2p-tvm verify` compares TVM outputs to the reference transformers path over a TSV file or directory.
 
 ### Reasonable input/output length (TTS use case)
 

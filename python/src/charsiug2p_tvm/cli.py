@@ -12,6 +12,7 @@ from charsiug2p_tvm.config import DEFAULT_CONFIG
 from charsiug2p_tvm.harness import reference_g2p
 from charsiug2p_tvm.tvm_compile import compile_tvm_module, default_output_dir
 from charsiug2p_tvm.tvm_runtime import tvm_g2p
+from charsiug2p_tvm.eval import evaluate_against_reference, prepare_samples
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
@@ -154,6 +155,60 @@ def run_tvm_model(
     table.add_column("Phonemes", style="white")
     for word, phoneme in zip(words, phones):
         table.add_row(word, phoneme)
+    console.print(table)
+
+
+@app.command("verify")
+def verify_tvm(
+    data_path: Path = typer.Argument(..., help="TSV file or directory to evaluate."),
+    lang: str | None = typer.Option(None, help="Override language code for a single TSV file."),
+    limit: int | None = typer.Option(None, help="Limit the number of samples."),
+    shuffle: bool = typer.Option(False, help="Shuffle samples before limiting."),
+    seed: int | None = typer.Option(None, help="Shuffle seed."),
+    strip_spaces: bool = typer.Option(False, help="Remove spaces before comparison."),
+    checkpoint: str = typer.Option(DEFAULT_CONFIG.checkpoint, help="HF checkpoint to use."),
+    max_input_bytes: int = typer.Option(DEFAULT_CONFIG.max_input_bytes, help="Max bytes for prefixed word."),
+    max_output_len: int = typer.Option(DEFAULT_CONFIG.max_output_len, help="Max output length."),
+    space_after_colon: bool = typer.Option(False, help="Insert a space after the language prefix."),
+    device: str = typer.Option("cpu", help="Device for reference and TVM runs."),
+    tvm_output_dir: Path | None = typer.Option(
+        None,
+        "--tvm-output-dir",
+        help="Directory containing compiled artifacts (defaults to dist/tvm/<model>/<details>/<target>).",
+    ),
+    tvm_target: str = typer.Option("llvm", help="TVM target used to compile artifacts."),
+    tvm_output_ext: str = typer.Option("so", help="Artifact extension (e.g., so, tar)."),
+    tvm_batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Compiled TVM batch size."),
+    ref_batch_size: int = typer.Option(8, help="Reference batch size."),
+) -> None:
+    """Compare TVM outputs against the reference transformers path."""
+    samples = prepare_samples(
+        path=data_path,
+        language=lang,
+        limit=limit,
+        shuffle=shuffle,
+        seed=seed,
+    )
+    metrics = evaluate_against_reference(
+        samples,
+        checkpoint=checkpoint,
+        max_input_bytes=max_input_bytes,
+        max_output_len=max_output_len,
+        space_after_colon=space_after_colon,
+        strip_spaces=strip_spaces,
+        tvm_output_dir=tvm_output_dir,
+        tvm_target=tvm_target,
+        tvm_output_ext=tvm_output_ext,
+        tvm_batch_size=tvm_batch_size,
+        ref_batch_size=ref_batch_size,
+        device=device,
+    )
+    table = Table(title="TVM vs Reference Metrics", show_header=True, header_style="bold")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="white")
+    table.add_row("Samples", str(metrics.total))
+    table.add_row("Exact match", f"{metrics.exact_match} ({metrics.exact_match_rate:.2%})")
+    table.add_row("CER", f"{metrics.cer:.4f}")
     console.print(table)
 
 
