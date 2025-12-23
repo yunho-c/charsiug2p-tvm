@@ -134,39 +134,62 @@ def tvm_g2p(
     runtime = TvmG2P(artifacts.encoder, artifacts.decoder, device=device)
 
     tokenizer = runtime.tokenizer
-    encoded = tokenizer(
-        prefixed_words,
-        padding="max_length",
-        truncation=True,
-        max_length=max_input_bytes,
-        add_special_tokens=False,
-        return_tensors="np",
-    )
-    input_ids = encoded["input_ids"].astype("int64")
-    attention_mask = encoded["attention_mask"].astype("int64")
-
-    if input_ids.shape[0] != batch_size:
-        raise ValueError(
-            f"Expected batch_size={batch_size} inputs, got {input_ids.shape[0]}."
-        )
-
-    encoder_hidden_states = runtime.encode(input_ids, attention_mask)
-
     decoder_start = tokenizer.pad_token_id
     if decoder_start is None:
         raise ValueError("Tokenizer pad_token_id is required for decoder start.")
     eos_token = tokenizer.eos_token_id
 
-    decoder_input_ids = np.full((batch_size, max_output_len), decoder_start, dtype="int64")
-    cur_len = 1
-    for step in range(1, max_output_len):
-        logits = runtime.decode_logits(decoder_input_ids, encoder_hidden_states, attention_mask)
-        logits_np = logits.numpy()
-        next_token = logits_np[:, step - 1].argmax(axis=-1)
-        decoder_input_ids[:, step] = next_token
-        cur_len = step + 1
-        if eos_token is not None and int(next_token[0]) == eos_token:
-            break
+    def pad_to_batch(array: np.ndarray, pad_value: int) -> np.ndarray:
+        """Pad a smaller batch up to the compiled batch_size."""
+        if array.shape[0] == batch_size:
+            return array
+        if array.shape[0] > batch_size:
+            raise ValueError(f"Batch size overflow: {array.shape[0]} > {batch_size}.")
+        pad_rows = batch_size - array.shape[0]
+        pad_shape = (pad_rows,) + array.shape[1:]
+        pad = np.full(pad_shape, pad_value, dtype=array.dtype)
+        return np.concatenate([array, pad], axis=0)
 
-    decoded = tokenizer.batch_decode(decoder_input_ids[:, :cur_len], skip_special_tokens=True)
-    return decoded
+    results: list[str] = []
+    # Run in fixed-size chunks because the compiled model has a static batch size.
+    for start in range(0, len(prefixed_words), batch_size):
+        batch_words = prefixed_words[start : start + batch_size]
+        encoded = tokenizer(
+            batch_words,
+            padding="max_length",
+            truncation=True,
+            max_length=max_input_bytes,
+            add_special_tokens=False,
+            return_tensors="np",
+        )
+        input_ids = encoded["input_ids"].astype("int64")
+        attention_mask = encoded["attention_mask"].astype("int64")
+
+        real_batch = input_ids.shape[0]
+        # Pad to the compiled batch size so shapes match the compiled artifacts.
+        input_ids = pad_to_batch(input_ids, pad_value=0)
+        attention_mask = pad_to_batch(attention_mask, pad_value=0)
+
+        encoder_hidden_states = runtime.encode(input_ids, attention_mask)
+
+        # Greedy decode: fill a fixed-length buffer with next-token argmax.
+        decoder_input_ids = np.full((batch_size, max_output_len), decoder_start, dtype="int64")
+        finished = np.zeros((batch_size,), dtype=bool)
+        for step in range(1, max_output_len):
+            logits = runtime.decode_logits(decoder_input_ids, encoder_hidden_states, attention_mask)
+            logits_np = logits.numpy()
+            next_token = logits_np[:, step - 1].argmax(axis=-1)
+            if eos_token is not None:
+                next_token = np.where(finished, eos_token, next_token)
+            decoder_input_ids[:, step] = next_token
+            if eos_token is not None:
+                finished |= next_token == eos_token
+                # Stop early once all *real* rows are finished.
+                if bool(finished[:real_batch].all()):
+                    break
+
+        decoded = tokenizer.batch_decode(decoder_input_ids[:, : max_output_len], skip_special_tokens=True)
+        # Drop padded rows and keep only real outputs.
+        results.extend(decoded[:real_batch])
+
+    return results
