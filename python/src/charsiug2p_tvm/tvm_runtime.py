@@ -10,7 +10,7 @@ import tvm
 import tvm.relax as relax
 from transformers import AutoTokenizer
 
-from charsiug2p_tvm.config import DEFAULT_CONFIG
+from charsiug2p_tvm.config import DEFAULT_CONFIG, resolve_target
 from charsiug2p_tvm.harness import add_language_prefix
 from charsiug2p_tvm.tvm_compile import default_output_dir
 
@@ -99,7 +99,7 @@ def tvm_g2p(
     output_dir: Path | None = None,
     checkpoint: str = DEFAULT_CONFIG.checkpoint,
     target: str = "llvm",
-    output_ext: str = "so",
+    output_ext: str | None = None,
     batch_size: int = DEFAULT_CONFIG.batch_size,
     max_input_bytes: int = DEFAULT_CONFIG.max_input_bytes,
     max_output_len: int = DEFAULT_CONFIG.max_output_len,
@@ -122,10 +122,14 @@ def tvm_g2p(
             "Increase the bound or filter long inputs."
         )
 
+    resolved = resolve_target(target, output_ext=output_ext)
+    target_name = resolved.name
+    output_ext = resolved.output_ext
+
     artifacts = resolve_artifacts(
         output_dir=output_dir,
         checkpoint=checkpoint,
-        target=target,
+        target=target_name,
         batch_size=batch_size,
         max_input_bytes=max_input_bytes,
         max_output_len=max_output_len,

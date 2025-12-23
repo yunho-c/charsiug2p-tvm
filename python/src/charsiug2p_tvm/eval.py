@@ -91,7 +91,7 @@ def evaluate_against_reference(
     strip_spaces: bool,
     tvm_output_dir: Path | None,
     tvm_target: str,
-    tvm_output_ext: str,
+    tvm_output_ext: str | None,
     tvm_batch_size: int,
     ref_batch_size: int,
     device: str,

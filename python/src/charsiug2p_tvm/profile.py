@@ -36,7 +36,7 @@ def profile_targets(
     max_input_bytes: int,
     max_output_len: int,
     space_after_colon: bool,
-    tvm_output_ext: str,
+    tvm_output_ext: str | None,
     tvm_batch_size: int,
     runs: int,
     warmup: bool,

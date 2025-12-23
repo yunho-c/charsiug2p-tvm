@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from charsiug2p_tvm import __version__
-from charsiug2p_tvm.config import DEFAULT_CONFIG
+from charsiug2p_tvm.config import DEFAULT_CONFIG, TARGET_CONFIGS, resolve_target
 from charsiug2p_tvm.harness import reference_g2p
 from charsiug2p_tvm.tvm_compile import compile_tvm_module, default_output_dir
 from charsiug2p_tvm.tvm_runtime import tvm_g2p
@@ -61,14 +61,19 @@ def compile_model(
     batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Batch size to compile for."),
     max_input_bytes: int = typer.Option(DEFAULT_CONFIG.max_input_bytes, help="Max bytes for prefixed word."),
     max_output_len: int = typer.Option(DEFAULT_CONFIG.max_output_len, help="Max output length."),
-    target: str = typer.Option("llvm", help="TVM target (e.g., llvm, metal, android)."),
-    output_ext: str = typer.Option("so", help="Output extension (e.g., so, tar)."),
+    target: str = typer.Option(
+        "llvm",
+        help=f"TVM target or preset ({', '.join(TARGET_CONFIGS)}).",
+    ),
+    output_ext: str | None = typer.Option(None, help="Output extension (defaults by target)."),
 ) -> None:
     """Compile encoder/decoder modules into TVM runtime artifacts."""
+    resolved = resolve_target(target, output_ext=output_ext)
+    output_ext = resolved.output_ext
     if output_dir is None:
         output_dir = default_output_dir(
             checkpoint=checkpoint,
-            target=target,
+            target=resolved.name,
             batch_size=batch_size,
             max_input_bytes=max_input_bytes,
             max_output_len=max_output_len,
@@ -129,8 +134,11 @@ def run_tvm_model(
         help="Directory containing compiled artifacts (defaults to dist/tvm/<model>/<details>/<target>).",
     ),
     checkpoint: str = typer.Option(DEFAULT_CONFIG.checkpoint, help="HF checkpoint to use."),
-    target: str = typer.Option("llvm", help="TVM target used to compile artifacts."),
-    output_ext: str = typer.Option("so", help="Artifact extension (e.g., so, tar)."),
+    target: str = typer.Option(
+        "llvm",
+        help=f"TVM target or preset used to compile artifacts ({', '.join(TARGET_CONFIGS)}).",
+    ),
+    output_ext: str | None = typer.Option(None, help="Artifact extension (defaults by target)."),
     batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Batch size to run."),
     max_input_bytes: int = typer.Option(DEFAULT_CONFIG.max_input_bytes, help="Max bytes for prefixed word."),
     max_output_len: int = typer.Option(DEFAULT_CONFIG.max_output_len, help="Max output length."),
@@ -177,8 +185,11 @@ def verify_tvm(
         "--tvm-output-dir",
         help="Directory containing compiled artifacts (defaults to dist/tvm/<model>/<details>/<target>).",
     ),
-    tvm_target: str = typer.Option("llvm", help="TVM target used to compile artifacts."),
-    tvm_output_ext: str = typer.Option("so", help="Artifact extension (e.g., so, tar)."),
+    tvm_target: str = typer.Option(
+        "llvm",
+        help=f"TVM target or preset used to compile artifacts ({', '.join(TARGET_CONFIGS)}).",
+    ),
+    tvm_output_ext: str | None = typer.Option(None, help="Artifact extension (defaults by target)."),
     tvm_batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Compiled TVM batch size."),
     ref_batch_size: int = typer.Option(8, help="Reference batch size."),
 ) -> None:
@@ -219,7 +230,7 @@ def profile_tvm(
     targets: list[str] = typer.Option(
         ...,
         "--target",
-        help="TVM target(s) to profile (repeatable or comma-separated).",
+        help=f"TVM target(s) or presets to profile ({', '.join(TARGET_CONFIGS)}).",
     ),
     limit: int | None = typer.Option(None, help="Limit the number of samples."),
     shuffle: bool = typer.Option(False, help="Shuffle samples before limiting."),
@@ -228,7 +239,7 @@ def profile_tvm(
     max_input_bytes: int = typer.Option(DEFAULT_CONFIG.max_input_bytes, help="Max bytes for prefixed word."),
     max_output_len: int = typer.Option(DEFAULT_CONFIG.max_output_len, help="Max output length."),
     space_after_colon: bool = typer.Option(False, help="Insert a space after the language prefix."),
-    tvm_output_ext: str = typer.Option("so", help="Artifact extension (e.g., so, tar)."),
+    tvm_output_ext: str | None = typer.Option(None, help="Artifact extension (defaults by target)."),
     tvm_batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Compiled TVM batch size."),
     runs: int = typer.Option(1, help="Number of timed runs to average."),
     warmup: bool = typer.Option(True, help="Run one warmup pass before timing."),

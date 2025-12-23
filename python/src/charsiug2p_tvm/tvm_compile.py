@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from charsiug2p_tvm.config import DEFAULT_CONFIG
+from charsiug2p_tvm.config import DEFAULT_CONFIG, resolve_target
 
 
 @dataclass(frozen=True)
@@ -108,13 +108,16 @@ def compile_tvm_module(
     max_input_bytes: int = DEFAULT_CONFIG.max_input_bytes,
     max_output_len: int = DEFAULT_CONFIG.max_output_len,
     target: str = "llvm",
-    output_ext: str = "so",
+    output_ext: str | None = None,
 ) -> dict[str, Path]:
     """Compile encoder/decoder modules into TVM runtime artifacts."""
+    resolved = resolve_target(target, output_ext=output_ext)
+    target_name = resolved.name
+    output_ext = resolved.output_ext
     if output_dir is None:
         output_dir = default_output_dir(
             checkpoint=checkpoint,
-            target=target,
+            target=target_name,
             batch_size=batch_size,
             max_input_bytes=max_input_bytes,
             max_output_len=max_output_len,
@@ -132,7 +135,7 @@ def compile_tvm_module(
     )
 
     artifacts: dict[str, Path] = {}
-    target_obj = tvm.target.Target(target)
+    target_obj = resolved.target
     relax_pipeline = relax.get_default_pipeline(target_obj)
 
     for name, mod in {"encoder": mods.encoder, "decoder": mods.decoder}.items():
@@ -149,20 +152,18 @@ def compile_tvm_module(
         script_path = output_dir / f"{name}.relax.py"
         script_path.write_text(mod.script(show_meta=True), encoding="utf-8")
 
+    metadata_entries = [
+        f"checkpoint={checkpoint}",
+        f"batch_size={batch_size}",
+        f"max_input_bytes={max_input_bytes}",
+        f"max_output_len={max_output_len}",
+        f"target={target_name}",
+        f"target_spec={target_obj}",
+        f"output_ext={output_ext}",
+    ]
+    if resolved.export_func:
+        metadata_entries.append(f"export_func={resolved.export_func}")
     metadata_path = output_dir / "compile_metadata.txt"
-    metadata_path.write_text(
-        "\n".join(
-            [
-                f"checkpoint={checkpoint}",
-                f"batch_size={batch_size}",
-                f"max_input_bytes={max_input_bytes}",
-                f"max_output_len={max_output_len}",
-                f"target={target}",
-                f"output_ext={output_ext}",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    metadata_path.write_text("\n".join(metadata_entries) + "\n", encoding="utf-8")
 
     return artifacts
