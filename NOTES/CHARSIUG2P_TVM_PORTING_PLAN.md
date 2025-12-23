@@ -37,6 +37,7 @@ flowchart LR
 - Length bounds: `max_input_bytes=64`, `max_output_len=128`.
 - Scaffolding: Typer CLI + `rich` for status output; placeholder modules in `python/src/charsiug2p_tvm/` for harness and TVM compile steps.
 - Reference harness: implemented in `python/src/charsiug2p_tvm/harness.py` using `transformers` + `torch`, with `charsiug2p-tvm run` CLI for quick validation.
+- TVM compile path: implemented in `python/src/charsiug2p_tvm/tvm_compile.py` with `charsiug2p-tvm compile --output-dir ...` generating encoder/decoder artifacts.
 
 ### Reasonable input/output length (TTS use case)
 
