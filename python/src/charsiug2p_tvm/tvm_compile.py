@@ -12,6 +12,19 @@ class ExportedModules:
     decoder: "tvm.IRModule"
 
 
+def default_output_dir(
+    *,
+    checkpoint: str,
+    target: str,
+    batch_size: int,
+    max_input_bytes: int,
+    max_output_len: int,
+) -> Path:
+    safe_name = checkpoint.replace("/", "_")
+    details = f"b{batch_size}_in{max_input_bytes}_out{max_output_len}"
+    return Path("dist") / "tvm" / safe_name / details / target
+
+
 def export_torch_model(
     *,
     checkpoint: str = DEFAULT_CONFIG.checkpoint,
@@ -89,7 +102,7 @@ def export_torch_model(
 
 def compile_tvm_module(
     *,
-    output_dir: Path,
+    output_dir: Path | None,
     checkpoint: str = DEFAULT_CONFIG.checkpoint,
     batch_size: int = DEFAULT_CONFIG.batch_size,
     max_input_bytes: int = DEFAULT_CONFIG.max_input_bytes,
@@ -98,6 +111,14 @@ def compile_tvm_module(
     output_ext: str = "so",
 ) -> dict[str, Path]:
     """Compile encoder/decoder modules into TVM runtime artifacts."""
+    if output_dir is None:
+        output_dir = default_output_dir(
+            checkpoint=checkpoint,
+            target=target,
+            batch_size=batch_size,
+            max_input_bytes=max_input_bytes,
+            max_output_len=max_output_len,
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     import tvm

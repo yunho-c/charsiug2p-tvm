@@ -14,4 +14,4 @@ venv/
 *.egg-info/
 build/
 dist/
-
+!dist/.gitkeep

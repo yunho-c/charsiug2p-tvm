@@ -10,7 +10,7 @@ from rich.table import Table
 from charsiug2p_tvm import __version__
 from charsiug2p_tvm.config import DEFAULT_CONFIG
 from charsiug2p_tvm.harness import reference_g2p
-from charsiug2p_tvm.tvm_compile import compile_tvm_module
+from charsiug2p_tvm.tvm_compile import compile_tvm_module, default_output_dir
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
@@ -49,7 +49,11 @@ def info() -> None:
 
 @app.command("compile")
 def compile_model(
-    output_dir: Path = typer.Option(..., "--output-dir", help="Output directory for compiled artifacts."),
+    output_dir: Path | None = typer.Option(
+        None,
+        "--output-dir",
+        help="Output directory for compiled artifacts (defaults to dist/tvm/<model>/<details>/<target>).",
+    ),
     checkpoint: str = typer.Option(DEFAULT_CONFIG.checkpoint, help="HF checkpoint to use."),
     batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Batch size to compile for."),
     max_input_bytes: int = typer.Option(DEFAULT_CONFIG.max_input_bytes, help="Max bytes for prefixed word."),
@@ -58,6 +62,14 @@ def compile_model(
     output_ext: str = typer.Option("so", help="Output extension (e.g., so, tar)."),
 ) -> None:
     """Compile encoder/decoder modules into TVM runtime artifacts."""
+    if output_dir is None:
+        output_dir = default_output_dir(
+            checkpoint=checkpoint,
+            target=target,
+            batch_size=batch_size,
+            max_input_bytes=max_input_bytes,
+            max_output_len=max_output_len,
+        )
     console.print(f"[cyan]Compiling TVM artifacts for {checkpoint}...[/cyan]")
     artifacts = compile_tvm_module(
         output_dir=output_dir,
