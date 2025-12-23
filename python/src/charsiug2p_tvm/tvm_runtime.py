@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Sequence
+
+import numpy as np
+
+import tvm
+import tvm.relax as relax
+from transformers import AutoTokenizer
+
+from charsiug2p_tvm.config import DEFAULT_CONFIG
+from charsiug2p_tvm.harness import add_language_prefix
+from charsiug2p_tvm.tvm_compile import default_output_dir
+
+_DEFAULT_TOKENIZER = "google/byt5-small"
+
+
+@dataclass(frozen=True)
+class RuntimeArtifacts:
+    encoder: Path
+    decoder: Path
+
+
+def resolve_artifacts(
+    *,
+    output_dir: Path | None,
+    checkpoint: str,
+    target: str,
+    batch_size: int,
+    max_input_bytes: int,
+    max_output_len: int,
+    output_ext: str,
+) -> RuntimeArtifacts:
+    if output_dir is None:
+        output_dir = default_output_dir(
+            checkpoint=checkpoint,
+            target=target,
+            batch_size=batch_size,
+            max_input_bytes=max_input_bytes,
+            max_output_len=max_output_len,
+        )
+    encoder_path = output_dir / f"encoder.{output_ext}"
+    decoder_path = output_dir / f"decoder.{output_ext}"
+    if not encoder_path.exists():
+        raise FileNotFoundError(f"Encoder artifact not found: {encoder_path}")
+    if not decoder_path.exists():
+        raise FileNotFoundError(f"Decoder artifact not found: {decoder_path}")
+    return RuntimeArtifacts(encoder=encoder_path, decoder=decoder_path)
+
+
+def _to_tensor(array: np.ndarray, device: tvm.runtime.Device) -> tvm.runtime.Tensor:
+    tensor = tvm.runtime.empty(array.shape, dtype=str(array.dtype), device=device)
+    tensor.copyfrom(array)
+    return tensor
+
+
+def _unwrap_single(output: object) -> tvm.runtime.Tensor:
+    if isinstance(output, tvm.runtime.Tensor):
+        return output
+    if hasattr(output, "__len__"):
+        length = len(output)  # type: ignore[arg-type]
+        if length != 1:
+            raise ValueError(f"Expected a single output tensor, got {length}.")
+        return output[0]  # type: ignore[index]
+    raise TypeError(f"Unexpected output type: {type(output)}")
+
+
+class TvmG2P:
+    def __init__(self, encoder_path: Path, decoder_path: Path, *, device: str = "cpu") -> None:
+        self.device = tvm.runtime.device(device, 0)
+        self.encoder_vm = relax.VirtualMachine(tvm.runtime.load_module(str(encoder_path)), self.device)
+        self.decoder_vm = relax.VirtualMachine(tvm.runtime.load_module(str(decoder_path)), self.device)
+        self.tokenizer = AutoTokenizer.from_pretrained(_DEFAULT_TOKENIZER)
+
+    def encode(self, input_ids: np.ndarray, attention_mask: np.ndarray) -> tvm.runtime.Tensor:
+        input_tensor = _to_tensor(input_ids, self.device)
+        mask_tensor = _to_tensor(attention_mask, self.device)
+        output = self.encoder_vm["main"](input_tensor, mask_tensor)
+        return _unwrap_single(output)
+
+    def decode_logits(
+        self,
+        decoder_input_ids: np.ndarray,
+        encoder_hidden_states: tvm.runtime.Tensor,
+        encoder_attention_mask: np.ndarray,
+    ) -> tvm.runtime.Tensor:
+        decoder_tensor = _to_tensor(decoder_input_ids, self.device)
+        mask_tensor = _to_tensor(encoder_attention_mask, self.device)
+        output = self.decoder_vm["main"](decoder_tensor, encoder_hidden_states, mask_tensor)
+        return _unwrap_single(output)
+
+
+def tvm_g2p(
+    words: Sequence[str],
+    lang: str,
+    *,
+    output_dir: Path | None = None,
+    checkpoint: str = DEFAULT_CONFIG.checkpoint,
+    target: str = "llvm",
+    output_ext: str = "so",
+    batch_size: int = DEFAULT_CONFIG.batch_size,
+    max_input_bytes: int = DEFAULT_CONFIG.max_input_bytes,
+    max_output_len: int = DEFAULT_CONFIG.max_output_len,
+    space_after_colon: bool = False,
+    device: str = "cpu",
+) -> list[str]:
+    if not words:
+        return []
+
+    prefixed_words = add_language_prefix(words, lang, space_after_colon=space_after_colon)
+    oversized = [
+        (word, len(prefixed.encode("utf-8")))
+        for word, prefixed in zip(words, prefixed_words)
+        if len(prefixed.encode("utf-8")) > max_input_bytes
+    ]
+    if oversized:
+        formatted = ", ".join(f"{word}={size}" for word, size in oversized[:5])
+        raise ValueError(
+            f"Input exceeds max_input_bytes={max_input_bytes} (examples: {formatted}). "
+            "Increase the bound or filter long inputs."
+        )
+
+    artifacts = resolve_artifacts(
+        output_dir=output_dir,
+        checkpoint=checkpoint,
+        target=target,
+        batch_size=batch_size,
+        max_input_bytes=max_input_bytes,
+        max_output_len=max_output_len,
+        output_ext=output_ext,
+    )
+    runtime = TvmG2P(artifacts.encoder, artifacts.decoder, device=device)
+
+    tokenizer = runtime.tokenizer
+    encoded = tokenizer(
+        prefixed_words,
+        padding="max_length",
+        truncation=True,
+        max_length=max_input_bytes,
+        add_special_tokens=False,
+        return_tensors="np",
+    )
+    input_ids = encoded["input_ids"].astype("int64")
+    attention_mask = encoded["attention_mask"].astype("int64")
+
+    if input_ids.shape[0] != batch_size:
+        raise ValueError(
+            f"Expected batch_size={batch_size} inputs, got {input_ids.shape[0]}."
+        )
+
+    encoder_hidden_states = runtime.encode(input_ids, attention_mask)
+
+    decoder_start = tokenizer.pad_token_id
+    if decoder_start is None:
+        raise ValueError("Tokenizer pad_token_id is required for decoder start.")
+    eos_token = tokenizer.eos_token_id
+
+    decoder_input_ids = np.full((batch_size, max_output_len), decoder_start, dtype="int64")
+    cur_len = 1
+    for step in range(1, max_output_len):
+        logits = runtime.decode_logits(decoder_input_ids, encoder_hidden_states, attention_mask)
+        logits_np = logits.numpy()
+        next_token = logits_np[:, step - 1].argmax(axis=-1)
+        decoder_input_ids[:, step] = next_token
+        cur_len = step + 1
+        if eos_token is not None and int(next_token[0]) == eos_token:
+            break
+
+    decoded = tokenizer.batch_decode(decoder_input_ids[:, :cur_len], skip_special_tokens=True)
+    return decoded

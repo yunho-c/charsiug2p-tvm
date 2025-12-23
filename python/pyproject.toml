@@ -4,6 +4,7 @@ dependencies = [
   "rich>=13.7",
   "psutil>=5.9",
   "ml_dtypes>=0.3",
+  "numpy>=1.26",
   "sentencepiece>=0.1.99",
   "torch>=2.2",
   "transformers>=4.38",

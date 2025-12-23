@@ -11,6 +11,7 @@ from charsiug2p_tvm import __version__
 from charsiug2p_tvm.config import DEFAULT_CONFIG
 from charsiug2p_tvm.harness import reference_g2p
 from charsiug2p_tvm.tvm_compile import compile_tvm_module, default_output_dir
+from charsiug2p_tvm.tvm_runtime import tvm_g2p
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
@@ -109,6 +110,46 @@ def run_model(
         device=device,
     )
     table = Table(title="CharsiuG2P Reference Output", show_header=True, header_style="bold")
+    table.add_column("Word", style="cyan")
+    table.add_column("Phonemes", style="white")
+    for word, phoneme in zip(words, phones):
+        table.add_row(word, phoneme)
+    console.print(table)
+
+
+@app.command("run-tvm")
+def run_tvm_model(
+    words: list[str] = typer.Argument(..., help="Words to convert to phonemes."),
+    lang: str = typer.Option(..., help="Language code (e.g., eng-us)."),
+    output_dir: Path | None = typer.Option(
+        None,
+        "--output-dir",
+        help="Directory containing compiled artifacts (defaults to dist/tvm/<model>/<details>/<target>).",
+    ),
+    checkpoint: str = typer.Option(DEFAULT_CONFIG.checkpoint, help="HF checkpoint to use."),
+    target: str = typer.Option("llvm", help="TVM target used to compile artifacts."),
+    output_ext: str = typer.Option("so", help="Artifact extension (e.g., so, tar)."),
+    batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Batch size to run."),
+    max_input_bytes: int = typer.Option(DEFAULT_CONFIG.max_input_bytes, help="Max bytes for prefixed word."),
+    max_output_len: int = typer.Option(DEFAULT_CONFIG.max_output_len, help="Max output length."),
+    space_after_colon: bool = typer.Option(False, help="Insert a space after the language prefix."),
+    device: str = typer.Option("cpu", help="TVM device string (e.g., cpu, cuda, metal)."),
+) -> None:
+    """Run G2P inference using compiled TVM artifacts."""
+    phones = tvm_g2p(
+        words,
+        lang,
+        output_dir=output_dir,
+        checkpoint=checkpoint,
+        target=target,
+        output_ext=output_ext,
+        batch_size=batch_size,
+        max_input_bytes=max_input_bytes,
+        max_output_len=max_output_len,
+        space_after_colon=space_after_colon,
+        device=device,
+    )
+    table = Table(title="CharsiuG2P TVM Output", show_header=True, header_style="bold")
     table.add_column("Word", style="cyan")
     table.add_column("Phonemes", style="white")
     for word, phoneme in zip(words, phones):

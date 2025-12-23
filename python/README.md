@@ -39,6 +39,8 @@ charsiug2p-tvm --version
 pixi run python -m charsiug2p_tvm info
 pixi run python -m charsiug2p_tvm run --lang eng-us Char siu
 pixi run python -m charsiug2p_tvm compile --target llvm --output-ext so
+# run inference using compiled TVM artifacts
+pixi run python -m charsiug2p_tvm run-tvm --lang eng-us Char siu
 # or, explicitly specify the output directory
 pixi run python -m charsiug2p_tvm compile --output-dir dist/tvm/byt5_tiny_8 --target llvm --output-ext so
 ```

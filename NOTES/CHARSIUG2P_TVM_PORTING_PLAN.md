@@ -39,6 +39,7 @@ flowchart LR
 - Reference harness: implemented in `python/src/charsiug2p_tvm/harness.py` using `transformers` + `torch`, with `charsiug2p-tvm run` CLI for quick validation.
 - TVM compile path: implemented in `python/src/charsiug2p_tvm/tvm_compile.py` with `charsiug2p-tvm compile --output-dir ...` generating encoder/decoder artifacts.
 - Default compile output directory: `dist/tvm/<checkpoint_sanitized>/<b{batch}_in{max_input}_out{max_output}>/<target>` (checkpoint uses `/` -> `_`) when `--output-dir` is omitted.
+- TVM runtime path: implemented in `python/src/charsiug2p_tvm/tvm_runtime.py` with `charsiug2p-tvm run-tvm` loading compiled encoder/decoder artifacts and performing greedy decode.
 
 ### Reasonable input/output length (TTS use case)
 
