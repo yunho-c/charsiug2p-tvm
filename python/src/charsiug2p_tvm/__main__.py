@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-from charsiug2p_tvm.cli import main
+from charsiug2p_tvm.cli import cli
 
-raise SystemExit(main())
+cli()
