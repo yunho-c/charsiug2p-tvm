@@ -271,6 +271,19 @@ Utility scripts for normalizing raw sources into consistent wordlists/dictionari
 - `clean_dicts.py`: filters entries with parentheses in pronunciation and strips spaces.
 - `clean_wordlist.py`: extracts words from frequency lists (threshold `--cutoff`), filters out digits and non-word symbols.
 
+## Pretrained checkpoints (from upstream README)
+
+The upstream `external/CharsiuG2P/README.md` explicitly lists these HuggingFace model IDs as the updated multilingual checkpoints (including Korean):
+
+| Model ID | Notes |
+|---|---|
+| `charsiu/g2p_multilingual_byT5_tiny_8_layers_100` | 100-language ByT5 tiny (8-layer). |
+| `charsiu/g2p_multilingual_byT5_tiny_12_layers_100` | 100-language ByT5 tiny (12-layer). |
+| `charsiu/g2p_multilingual_byT5_tiny_16_layers_100` | 100-language ByT5 tiny (16-layer). |
+| `charsiu/g2p_multilingual_byT5_small_100` | 100-language ByT5 small. |
+
+The README also notes that pretrained models are hosted on HuggingFace under the `charsiu` org and “G2P” prefix; only the four multilingual checkpoints above are enumerated in the README itself.
+
 ## Outputs and artifacts
 
 ### Training outputs

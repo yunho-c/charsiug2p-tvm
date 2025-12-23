@@ -25,6 +25,42 @@ flowchart LR
 - Frontend: start with `torch.export.export()` -> `tvm.relax.frontend.torch.from_exported_program(...)`. Keep ONNX as fallback if torch export hits unsupported ops.
 - Runtime: start with `relax.VirtualMachine` (fast iteration, fewer AOT constraints). Consider AOT later for embedded use.
 - Decode: ship an MVP without KV-cache (recompute decoder over full prefix) to validate correctness; then add KV-cache for speed using a prefill + decode structure.
+- Execution: use `pixi run python` for all scripts and harnesses.
+
+## Current decisions (for initial port)
+
+- Checkpoint: `charsiu/g2p_multilingual_byT5_tiny_8_layers_100`.
+- Batch size: 1.
+- Precision: fp32 first (to simplify numerical validation).
+- Scope: TVM + Python harness only (no mobile sample app in this repo).
+- Decode strategy: greedy (beam=1) for baseline, evaluate beam search later if needed.
+- Length bounds: `max_input_bytes=64`, `max_output_len=128`.
+
+### Reasonable input/output length (TTS use case)
+
+CharsiuG2P is word-level G2P. For TTS, you typically run it on tokenized words (not sentences), so length limits can be fairly small.
+
+Recommended starting bounds:
+
+- `max_input_bytes`: 64 (safe for most words), 96 if you want extra headroom for long Germanic compounds or transliterations.
+- `max_output_len`: 128 (IPA is often longer than the graphemes; 2x input is usually safe).
+
+If you want to be more conservative for rare long words, use `max_input_bytes=96` and `max_output_len=160`. Once the harness works, we can compute empirical max lengths from `external/CharsiuG2P/dicts` and tighten these bounds.
+
+### Empirical length stats (from `external/CharsiuG2P/dicts`)
+
+Measured with `pixi run python` over all `dicts/*.tsv` entries, using UTF-8 byte lengths:
+
+| Metric | Count | P50 | P90 | P95 | P99 | P99.9 | Max | Mean |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `word_bytes` | 7,282,524 | 11 | 18 | 20 | 27 | 38 | 141 | 11.56 |
+| `word_prefixed_bytes` (`<lang>:` + word) | 7,282,524 | 18 | 24 | 27 | 33 | 44 | 147 | 18.25 |
+| `pron_bytes` | 7,282,524 | 13 | 22 | 26 | 44 | 85 | 370 | 14.52 |
+
+Interpretation:
+
+- The chosen bounds `max_input_bytes=64` and `max_output_len=128` cover well beyond the 99.9th percentile for both inputs and outputs.
+- There are long-tail outliers (e.g., `pron_bytes` max 370). If those are important, we can raise bounds or special-case long inputs.
 
 ## Mobile deployment focus (iOS + Android)
 
@@ -115,7 +151,7 @@ flowchart LR
 
 ### 1) Pick target model + constraints
 
-- Decide: checkpoint (e.g., `charsiu/g2p_multilingual_byT5_tiny_16_layers_100`), `max_input_bytes`, `max_output_len`, batch size, mobile targets (`iphone`, `android`) plus a dev target (`llvm`).
+- Decide: checkpoint (`charsiu/g2p_multilingual_byT5_tiny_8_layers_100`), `max_input_bytes`, `max_output_len`, batch size, mobile targets (`iphone`, `android`) plus a dev target (`llvm`).
 - Acceptance: frozen "contract" (max lengths, dtype, device targets) you can compile against.
 
 ### 2) Build a gold-reference harness (PyTorch)
@@ -169,3 +205,17 @@ flowchart LR
 - Torch export incompatibilities (T5 attention, relative position bias): mitigate by exporting smaller wrappers, enabling decomposition (`run_ep_decomposition=True`), or falling back to ONNX for forward graphs.
 - Cache complexity for encoder-decoder (self-attn + cross-attn): start cacheless; then cache decoder self-attn first; treat cross-attn keys/values as precomputed from encoder states.
 - Input prefix exactness (`"<lang>:"` vs `"<lang>: "`): lock this to the exact HF checkpoint behavior via the gold harness and treat it as part of the model contract.
+
+## Beam search: pros and cons (for G2P)
+
+Pros:
+
+- Often improves pronunciation accuracy on ambiguous words or low-resource languages.
+- Can reduce rare hallucinations in the decoder (by exploring alternatives).
+- Useful if you plan to expose multiple pronunciations (n-best outputs).
+
+Cons:
+
+- Slower and more memory intensive (multiple beams per step).
+- Harder to make fully static-shape on-device without over-allocating buffers.
+- For these G2P checkpoints, the README suggests greedy decoding is already sufficient.
