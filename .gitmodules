@@ -1,3 +1,6 @@
 [submodule "external/tvm"]
 	path = external/tvm
 	url = https://github.com/yunho-c/tvm
+[submodule "external/CharsiuG2P"]
+	path = external/CharsiuG2P
+	url = https://github.com/yunho-c/CharsiuG2P
