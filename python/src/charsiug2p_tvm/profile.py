@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from charsiug2p_tvm.config import default_device_for_target
 from charsiug2p_tvm.eval import prepare_samples
 from charsiug2p_tvm.tvm_runtime import tvm_g2p
 
@@ -20,9 +21,7 @@ class ProfileResult:
 
 
 def _default_device_for_target(target: str) -> str:
-    if target in {"cuda", "metal", "vulkan", "opencl"}:
-        return target
-    return "cpu"
+    return default_device_for_target(target)
 
 
 def profile_targets(

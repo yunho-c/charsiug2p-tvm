@@ -112,3 +112,11 @@ def _normalize_extension(output_ext: str | None) -> str | None:
     if output_ext is None:
         return None
     return output_ext.lstrip(".")
+
+
+def default_device_for_target(target_name: str) -> str:
+    target = resolve_target(target_name).target
+    kind = target.kind.name
+    if kind in {"cuda", "rocm", "metal", "vulkan", "opencl", "webgpu"}:
+        return kind
+    return "cpu"

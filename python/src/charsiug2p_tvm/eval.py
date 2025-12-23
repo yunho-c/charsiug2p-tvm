@@ -94,7 +94,8 @@ def evaluate_against_reference(
     tvm_output_ext: str | None,
     tvm_batch_size: int,
     ref_batch_size: int,
-    device: str,
+    ref_device: str,
+    tvm_device: str,
 ) -> EvalMetrics:
     if not samples:
         return EvalMetrics(total=0, exact_match=0, exact_match_rate=0.0, cer=0.0)
@@ -119,7 +120,7 @@ def evaluate_against_reference(
                     max_input_bytes=max_input_bytes,
                     max_output_len=max_output_len,
                     space_after_colon=space_after_colon,
-                    device=device,
+                    device=ref_device,
                 )
             )
 
@@ -137,7 +138,7 @@ def evaluate_against_reference(
                     max_input_bytes=max_input_bytes,
                     max_output_len=max_output_len,
                     space_after_colon=space_after_colon,
-                    device=device,
+                    device=tvm_device,
                 )
             )
 
