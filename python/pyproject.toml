@@ -1,6 +1,12 @@
 [project]
 authors = [{name = "Yunho", email = "yhjc2692@gmail.com"}]
-dependencies = ["rich>=13.7", "typer>=0.12"]
+dependencies = [
+  "rich>=13.7",
+  "sentencepiece>=0.1.99",
+  "torch>=2.2",
+  "transformers>=4.38",
+  "typer>=0.12",
+]
 description = "Python package scaffold for charsiug2p-tvm."
 name = "charsiug2p-tvm"
 readme = "README.md"

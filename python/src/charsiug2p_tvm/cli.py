@@ -8,6 +8,7 @@ from rich.table import Table
 
 from charsiug2p_tvm import __version__
 from charsiug2p_tvm.config import DEFAULT_CONFIG
+from charsiug2p_tvm.harness import reference_g2p
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
@@ -52,10 +53,31 @@ def compile_model() -> None:
 
 
 @app.command("run")
-def run_model() -> None:
-    """Run a single G2P inference (placeholder)."""
-    console.print("[yellow]Run pipeline not implemented yet.[/yellow]")
-    console.print("Start in `charsiug2p_tvm/harness.py`.")
+def run_model(
+    words: list[str] = typer.Argument(..., help="Words to convert to phonemes."),
+    lang: str = typer.Option(..., help="Language code (e.g., eng-us)."),
+    checkpoint: str = typer.Option(DEFAULT_CONFIG.checkpoint, help="HF checkpoint to use."),
+    max_input_bytes: int = typer.Option(DEFAULT_CONFIG.max_input_bytes, help="Max bytes for prefixed word."),
+    max_output_len: int = typer.Option(DEFAULT_CONFIG.max_output_len, help="Max output length."),
+    space_after_colon: bool = typer.Option(False, help="Insert a space after the language prefix."),
+    device: str = typer.Option("cpu", help="Torch device to run on."),
+) -> None:
+    """Run a reference G2P inference using transformers."""
+    phones = reference_g2p(
+        words,
+        lang,
+        checkpoint=checkpoint,
+        max_input_bytes=max_input_bytes,
+        max_output_len=max_output_len,
+        space_after_colon=space_after_colon,
+        device=device,
+    )
+    table = Table(title="CharsiuG2P Reference Output", show_header=True, header_style="bold")
+    table.add_column("Word", style="cyan")
+    table.add_column("Phonemes", style="white")
+    for word, phoneme in zip(words, phones):
+        table.add_row(word, phoneme)
+    console.print(table)
 
 
 def cli() -> None:

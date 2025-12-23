@@ -36,6 +36,7 @@ flowchart LR
 - Decode strategy: greedy (beam=1) for baseline, evaluate beam search later if needed.
 - Length bounds: `max_input_bytes=64`, `max_output_len=128`.
 - Scaffolding: Typer CLI + `rich` for status output; placeholder modules in `python/src/charsiug2p_tvm/` for harness and TVM compile steps.
+- Reference harness: implemented in `python/src/charsiug2p_tvm/harness.py` using `transformers` + `torch`, with `charsiug2p-tvm run` CLI for quick validation.
 
 ### Reasonable input/output length (TTS use case)
 
