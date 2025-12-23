@@ -1,0 +1,3 @@
+[submodule "external/tvm"]
+	path = external/tvm
+	url = https://github.com/yunho-c/tvm
