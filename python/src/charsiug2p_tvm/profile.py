@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+import csv
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Sequence
+
+from charsiug2p_tvm.eval import prepare_samples
+from charsiug2p_tvm.tvm_runtime import tvm_g2p
+
+
+@dataclass(frozen=True)
+class ProfileResult:
+    target: str
+    device: str
+    samples: int
+    total_seconds: float
+    per_sample_ms: float
+
+
+def _default_device_for_target(target: str) -> str:
+    if target in {"cuda", "metal", "vulkan", "opencl"}:
+        return target
+    return "cpu"
+
+
+def profile_targets(
+    *,
+    data_path: Path,
+    targets: Sequence[str],
+    limit: int | None,
+    shuffle: bool,
+    seed: int | None,
+    checkpoint: str,
+    max_input_bytes: int,
+    max_output_len: int,
+    space_after_colon: bool,
+    tvm_output_ext: str,
+    tvm_batch_size: int,
+    runs: int,
+    warmup: bool,
+    device: str | None,
+) -> list[ProfileResult]:
+    samples = prepare_samples(
+        path=data_path,
+        language=None,
+        limit=limit,
+        shuffle=shuffle,
+        seed=seed,
+    )
+    if not samples:
+        return []
+
+    words = [sample.word for sample in samples]
+    lang = samples[0].lang
+
+    results: list[ProfileResult] = []
+    for target in targets:
+        device_name = device or _default_device_for_target(target)
+        if warmup:
+            tvm_g2p(
+                words,
+                lang,
+                checkpoint=checkpoint,
+                target=target,
+                output_ext=tvm_output_ext,
+                batch_size=tvm_batch_size,
+                max_input_bytes=max_input_bytes,
+                max_output_len=max_output_len,
+                space_after_colon=space_after_colon,
+                device=device_name,
+            )
+
+        total = 0.0
+        for _ in range(max(1, runs)):
+            start = time.perf_counter()
+            tvm_g2p(
+                words,
+                lang,
+                checkpoint=checkpoint,
+                target=target,
+                output_ext=tvm_output_ext,
+                batch_size=tvm_batch_size,
+                max_input_bytes=max_input_bytes,
+                max_output_len=max_output_len,
+                space_after_colon=space_after_colon,
+                device=device_name,
+            )
+            total += time.perf_counter() - start
+
+        total_avg = total / max(1, runs)
+        per_sample_ms = (total_avg / len(words)) * 1000.0
+        results.append(
+            ProfileResult(
+                target=target,
+                device=device_name,
+                samples=len(words),
+                total_seconds=total_avg,
+                per_sample_ms=per_sample_ms,
+            )
+        )
+
+    return results
+
+
+def parse_targets(values: Sequence[str]) -> list[str]:
+    targets: list[str] = []
+    for value in values:
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+        targets.extend(parts)
+    if not targets:
+        raise ValueError("No targets provided.")
+    return targets
+
+
+def write_profile_csv(path: Path, results: Sequence[ProfileResult]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["target", "device", "samples", "total_seconds", "per_sample_ms"])
+        for result in results:
+            writer.writerow(
+                [
+                    result.target,
+                    result.device,
+                    result.samples,
+                    f"{result.total_seconds:.6f}",
+                    f"{result.per_sample_ms:.3f}",
+                ]
+            )

@@ -13,6 +13,7 @@ from charsiug2p_tvm.harness import reference_g2p
 from charsiug2p_tvm.tvm_compile import compile_tvm_module, default_output_dir
 from charsiug2p_tvm.tvm_runtime import tvm_g2p
 from charsiug2p_tvm.eval import evaluate_against_reference, prepare_samples
+from charsiug2p_tvm.profile import parse_targets, profile_targets, write_profile_csv
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
@@ -210,6 +211,73 @@ def verify_tvm(
     table.add_row("Exact match", f"{metrics.exact_match} ({metrics.exact_match_rate:.2%})")
     table.add_row("CER", f"{metrics.cer:.4f}")
     console.print(table)
+
+
+@app.command("profile")
+def profile_tvm(
+    data_path: Path = typer.Argument(..., help="TSV file or directory to profile."),
+    targets: list[str] = typer.Option(
+        ...,
+        "--target",
+        help="TVM target(s) to profile (repeatable or comma-separated).",
+    ),
+    limit: int | None = typer.Option(None, help="Limit the number of samples."),
+    shuffle: bool = typer.Option(False, help="Shuffle samples before limiting."),
+    seed: int | None = typer.Option(None, help="Shuffle seed."),
+    checkpoint: str = typer.Option(DEFAULT_CONFIG.checkpoint, help="HF checkpoint to use."),
+    max_input_bytes: int = typer.Option(DEFAULT_CONFIG.max_input_bytes, help="Max bytes for prefixed word."),
+    max_output_len: int = typer.Option(DEFAULT_CONFIG.max_output_len, help="Max output length."),
+    space_after_colon: bool = typer.Option(False, help="Insert a space after the language prefix."),
+    tvm_output_ext: str = typer.Option("so", help="Artifact extension (e.g., so, tar)."),
+    tvm_batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Compiled TVM batch size."),
+    runs: int = typer.Option(1, help="Number of timed runs to average."),
+    warmup: bool = typer.Option(True, help="Run one warmup pass before timing."),
+    device: str | None = typer.Option(None, help="Override device for all targets."),
+    output_file: Path = typer.Option(
+        Path("dist/profile_results.csv"),
+        help="CSV output path for profiling results.",
+    ),
+) -> None:
+    """Profile TVM inference across multiple targets and write a CSV report."""
+    normalized_targets = parse_targets(targets)
+    results = profile_targets(
+        data_path=data_path,
+        targets=normalized_targets,
+        limit=limit,
+        shuffle=shuffle,
+        seed=seed,
+        checkpoint=checkpoint,
+        max_input_bytes=max_input_bytes,
+        max_output_len=max_output_len,
+        space_after_colon=space_after_colon,
+        tvm_output_ext=tvm_output_ext,
+        tvm_batch_size=tvm_batch_size,
+        runs=runs,
+        warmup=warmup,
+        device=device,
+    )
+    if not results:
+        console.print("[yellow]No samples found; nothing to profile.[/yellow]")
+        raise typer.Exit(code=1)
+
+    table = Table(title="TVM Profile Results", show_header=True, header_style="bold")
+    table.add_column("Target", style="cyan")
+    table.add_column("Device", style="white")
+    table.add_column("Samples", style="white", justify="right")
+    table.add_column("Total (s)", style="white", justify="right")
+    table.add_column("Per-sample (ms)", style="white", justify="right")
+    for result in results:
+        table.add_row(
+            result.target,
+            result.device,
+            str(result.samples),
+            f"{result.total_seconds:.3f}",
+            f"{result.per_sample_ms:.3f}",
+        )
+    console.print(table)
+
+    write_profile_csv(output_file, results)
+    console.print(f"[green]Saved CSV to {output_file}[/green]")
 
 
 def cli() -> None:
