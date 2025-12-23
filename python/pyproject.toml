@@ -1,0 +1,60 @@
+[project]
+authors = [{name = "Yunho", email = "yhjc2692@gmail.com"}]
+dependencies = []
+description = "Python package scaffold for charsiug2p-tvm."
+name = "charsiug2p-tvm"
+readme = "README.md"
+requires-python = ">= 3.12"
+version = "0.1.0"
+
+[project.scripts]
+charsiug2p-tvm = "charsiug2p_tvm.cli:main"
+
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/charsiug2p_tvm"]
+
+[tool.hatch.envs.default]
+dependencies = ["pytest", "ruff"]
+
+[tool.hatch.envs.default.scripts]
+fmt = "ruff format ."
+fmt-check = "ruff format --check ."
+lint = "ruff check ."
+test = "pytest -q"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["charsiug2p_tvm"]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.dependencies]
+python = "3.12.*"
+
+[tool.pixi.pypi-dependencies]
+"charsiug2p-tvm" = { path = ".", editable = true }
+hatch = "*"
+pytest = "*"
+ruff = "*"
+
+[tool.pixi.tasks]
+fmt = "ruff format ."
+fmt-check = "ruff format --check ."
+lint = "ruff check ."
+test = "pytest -q"
