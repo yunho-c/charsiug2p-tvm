@@ -49,11 +49,14 @@ python = "3.12.*"
 
 [tool.pixi.pypi-dependencies]
 "charsiug2p-tvm" = { path = ".", editable = true }
+tvm = { path = "../external/tvm/python", editable = true }
+apache-tvm-ffi = { path = "../external/tvm/3rdparty/tvm-ffi", editable = true }
 hatch = "*"
 pytest = "*"
 ruff = "*"
 
 [tool.pixi.tasks]
+build-tvm = "bash scripts/build_tvm.sh"
 fmt = "ruff format ."
 fmt-check = "ruff format --check ."
 lint = "ruff check ."
