@@ -306,14 +306,22 @@ def profile_tvm(
     table.add_column("Device", style="white")
     table.add_column("Samples", style="white", justify="right")
     table.add_column("Total (s)", style="white", justify="right")
+    table.add_column("Encoder (s)", style="white", justify="right")
+    table.add_column("Decoder (s)", style="white", justify="right")
     table.add_column("Per-sample (ms)", style="white", justify="right")
+    table.add_column("Encoder/sample (ms)", style="white", justify="right")
+    table.add_column("Decoder/sample (ms)", style="white", justify="right")
     for result in results:
         table.add_row(
             result.target,
             result.device,
             str(result.samples),
             f"{result.total_seconds:.3f}",
+            f"{result.encoder_seconds:.3f}",
+            f"{result.decoder_seconds:.3f}",
             f"{result.per_sample_ms:.3f}",
+            f"{result.encoder_per_sample_ms:.3f}",
+            f"{result.decoder_per_sample_ms:.3f}",
         )
     console.print(table)
 
