@@ -132,8 +132,16 @@ def compile_tvm_module(
     )
 
     artifacts: dict[str, Path] = {}
+    target_obj = tvm.target.Target(target)
+    relax_pipeline = relax.get_default_pipeline(target_obj)
+
     for name, mod in {"encoder": mods.encoder, "decoder": mods.decoder}.items():
-        exec_obj = relax.build(mod, target=target, exec_mode="bytecode")
+        exec_obj = relax.build(
+            mod,
+            target=target_obj,
+            exec_mode="bytecode",
+            relax_pipeline=relax_pipeline,
+        )
         out_path = output_dir / f"{name}.{output_ext}"
         exec_obj.export_library(str(out_path))
         artifacts[name] = out_path
