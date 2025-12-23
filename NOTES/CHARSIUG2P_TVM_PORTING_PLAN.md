@@ -26,11 +26,96 @@ flowchart LR
 - Runtime: start with `relax.VirtualMachine` (fast iteration, fewer AOT constraints). Consider AOT later for embedded use.
 - Decode: ship an MVP without KV-cache (recompute decoder over full prefix) to validate correctness; then add KV-cache for speed using a prefill + decode structure.
 
+## Mobile deployment focus (iOS + Android)
+
+- Target devices: iPhone/iPad (Metal) and Android (OpenCL/Vulkan or CPU fallback), with Relax VM as the on-device runtime.
+- Output format: plan to produce mobile-friendly archives (commonly `.tar`) that bundle the compiled objects and TVM runtime pieces.
+- Toolchain: iOS builds must be done on macOS; Android builds can be cross-compiled with NDK.
+- Host triples to target: `arm64-apple-ios` (iOS) and `aarch64-linux-android` (Android).
+- Goal: ship a minimal runtime footprint (static or slim runtime where possible).
+
+## MLC-LLM-derived hints (useful patterns to copy)
+
+- MLC-LLM compiles for iOS/Android and packages model libraries into `.tar` outputs; mirror that for CharsiuG2P artifacts.
+- MLC-LLM links optional `flash_attn` when available; if we later introduce custom attention kernels, we can follow the same pattern (optional link, fallback behavior).
+- MLC-LLM’s engine is cross-platform; treat it as a reference for how to structure mobile packaging and runtime dependencies, even if the model/ops differ.
+
+## Concrete build checklist (mobile)
+
+### A. Compile the model (host machine)
+
+1) Export PyTorch model to Relax
+   - Use `torch.export.export()` and `tvm.relax.frontend.torch.from_exported_program(...)`.
+   - Freeze input shapes using the chosen `max_input_bytes` and `max_output_len`.
+2) Build a Relax VM executable
+   - Compile with `tvm.compile(mod, target=...)` for each target:
+     - iOS: `--device iphone`, host triple `arm64-apple-ios`.
+     - Android: `--device android`, host triple `aarch64-linux-android`.
+   - Emit a mobile-friendly archive (`.tar`) containing compiled objects and metadata.
+3) Package runtime + assets
+   - Bundle: compiled archive, TVM runtime libs, tokenizer files, and a minimal config JSON.
+   - Keep a “model manifest” with shape limits and dtype.
+
+### B. Build runtime libs
+
+1) TVM runtime (core)
+   - Build a slim TVM runtime for each platform (prefer static where feasible).
+   - Ensure `relax.VirtualMachine` support is included.
+2) Optional: custom kernels / attention
+   - If you add custom attention, follow MLC-LLM’s pattern: link optional `flash_attn` when available; otherwise build without it.
+
+### C. iOS integration checklist
+
+1) Build on macOS with Xcode toolchain.
+2) Add the compiled `.tar` outputs and tokenizer assets to the app bundle.
+3) Link `tvm_runtime` (static or dynamic) into the app target.
+4) Implement a thin C++/Objective-C++ bridge:
+   - Load the compiled module.
+   - Instantiate Relax VM on Metal or CPU.
+   - Expose `run_g2p(words, lang)` to Swift.
+5) Validate on device:
+   - Single-word test from the golden set.
+   - Compare output strings against the reference harness.
+
+### D. Android integration checklist
+
+1) Use NDK to build and link `tvm_runtime` into an Android library (`.so`).
+2) Add the compiled `.tar` outputs and tokenizer assets into `assets/`.
+3) Implement a JNI wrapper:
+   - Load the compiled module.
+   - Instantiate Relax VM (Vulkan/OpenCL or CPU).
+   - Expose `run_g2p(words, lang)` to Kotlin/Java.
+4) Validate on device:
+   - Single-word test from the golden set.
+   - Compare output strings against the reference harness.
+
+## Sample app skeleton (minimal)
+
+### iOS (Swift + Objective-C++)
+
+- Swift UI layer:
+  - Text input + language picker.
+  - Call `G2PBridge.run(words: [String], lang: String)` and display outputs.
+- Objective-C++ bridge (`G2PBridge.mm`):
+  - Load model archive and tokenizer assets from the app bundle.
+  - Initialize Relax VM and keep it as a singleton.
+  - Provide `run(words, lang)` -> `[String]`.
+
+### Android (Kotlin + JNI)
+
+- Kotlin UI layer:
+  - Text input + language picker.
+  - Call `G2PBridge.run(words, lang)` and display outputs.
+- JNI layer (`g2p_jni.cpp`):
+  - Load model archive and tokenizer assets from `assets/`.
+  - Initialize Relax VM and keep it as a singleton.
+  - Provide `run(words, lang)` -> `String[]`.
+
 ## Implementation plan (phased, with acceptance criteria)
 
 ### 1) Pick target model + constraints
 
-- Decide: checkpoint (e.g., `charsiu/g2p_multilingual_byT5_tiny_16_layers_100`), `max_input_bytes`, `max_output_len`, batch size, targets (`llvm`, `cuda`).
+- Decide: checkpoint (e.g., `charsiu/g2p_multilingual_byT5_tiny_16_layers_100`), `max_input_bytes`, `max_output_len`, batch size, mobile targets (`iphone`, `android`) plus a dev target (`llvm`).
 - Acceptance: frozen "contract" (max lengths, dtype, device targets) you can compile against.
 
 ### 2) Build a gold-reference harness (PyTorch)
@@ -70,13 +155,14 @@ flowchart LR
 
 - CPU: rely on standard schedules + fusion; consider `meta_schedule` only if shapes are static enough.
 - GPU: apply default GPU pipeline and evaluate fp16/bf16 if acceptable.
-- Acceptance: repeatable build script producing a `.so` (or VM executable) with measured speedups vs PyTorch eager.
+- Acceptance: repeatable build script producing mobile artifacts (e.g., `.tar`) and a local dev executable with measured speedups vs PyTorch eager.
 
 ### 8) Packaging + ergonomics
 
 - Provide a small Python API mirroring CharsiuG2P usage (tokenized words in, pron strings out), plus a CLI.
-- Ship compiled artifacts per target (CPU/GPU) and cache by `(model_id, target, max_lens, dtype)`.
-- Acceptance: `pip install -e python` + one-command demo on a clean machine with only TVM runtime + your package.
+- Ship compiled artifacts per target (iOS/Android/dev) and cache by `(model_id, target, max_lens, dtype)`.
+- Add mobile packaging docs: what to bundle in an app (compiled archive + tvm runtime libs + tokenizer assets).
+- Acceptance: a one-command demo on desktop + a minimal mobile sample app that loads the compiled model and runs one test word.
 
 ## Risks / mitigations
 
