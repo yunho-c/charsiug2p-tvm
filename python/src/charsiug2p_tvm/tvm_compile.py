@@ -109,6 +109,9 @@ def compile_tvm_module(
     max_output_len: int = DEFAULT_CONFIG.max_output_len,
     target: str = "llvm",
     output_ext: str | None = None,
+    mixed_precision: bool = False,
+    mixed_precision_out_dtype: str = "float32",
+    fp16_input_names: list[str] | None = None,
 ) -> dict[str, Path]:
     """Compile encoder/decoder modules into TVM runtime artifacts."""
     resolved = resolve_target(target, output_ext=output_ext)
@@ -137,6 +140,19 @@ def compile_tvm_module(
     artifacts: dict[str, Path] = {}
     target_obj = resolved.target
     relax_pipeline = relax.get_default_pipeline(target_obj)
+    if mixed_precision:
+        fp16_input_names = fp16_input_names or None
+        mixed_precision_pipeline = tvm.transform.Sequential(
+            [
+                relax.transform.ConvertToDataflow(),
+                relax.transform.ToMixedPrecision(
+                    out_dtype=mixed_precision_out_dtype,
+                    fp16_input_names=fp16_input_names,
+                ),
+                relax.transform.ToNonDataflow(),
+            ]
+        )
+        relax_pipeline = tvm.transform.Sequential([mixed_precision_pipeline, relax_pipeline])
 
     for name, mod in {"encoder": mods.encoder, "decoder": mods.decoder}.items():
         exec_obj = relax.build(
@@ -160,6 +176,9 @@ def compile_tvm_module(
         f"target={target_name}",
         f"target_spec={target_obj}",
         f"output_ext={output_ext}",
+        f"mixed_precision={mixed_precision}",
+        f"mixed_precision_out_dtype={mixed_precision_out_dtype}",
+        f"mixed_precision_fp16_inputs={','.join(fp16_input_names or [])}",
     ]
     if resolved.export_func:
         metadata_entries.append(f"export_func={resolved.export_func}")

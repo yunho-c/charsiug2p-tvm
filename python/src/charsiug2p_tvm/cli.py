@@ -66,6 +66,21 @@ def compile_model(
         help=f"TVM target or preset ({', '.join(TARGET_CONFIGS)}).",
     ),
     output_ext: str | None = typer.Option(None, help="Output extension (defaults by target)."),
+    mixed_precision: bool = typer.Option(
+        False,
+        "--mixed-precision/--no-mixed-precision",
+        help="Enable Relax mixed-precision rewriting.",
+    ),
+    mixed_precision_out_dtype: str = typer.Option(
+        "float32",
+        "--mixed-precision-out-dtype",
+        help="Accumulator dtype for mixed precision (e.g., float32, float16).",
+    ),
+    fp16_input_names: list[str] | None = typer.Option(
+        None,
+        "--fp16-input",
+        help="Function parameter name to cast to fp16 (repeatable).",
+    ),
 ) -> None:
     """Compile encoder/decoder modules into TVM runtime artifacts."""
     resolved = resolve_target(target, output_ext=output_ext)
@@ -87,6 +102,9 @@ def compile_model(
         max_output_len=max_output_len,
         target=target,
         output_ext=output_ext,
+        mixed_precision=mixed_precision,
+        mixed_precision_out_dtype=mixed_precision_out_dtype,
+        fp16_input_names=fp16_input_names,
     )
     table = Table(title="TVM Compile Outputs", show_header=True, header_style="bold")
     table.add_column("Module", style="cyan")
