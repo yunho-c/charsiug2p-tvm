@@ -81,11 +81,13 @@ impl G2pTokenizer {
             pad_id,
             ..Default::default()
         }));
-        tokenizer.with_truncation(Some(TruncationParams {
+        if let Err(err) = tokenizer.with_truncation(Some(TruncationParams {
             max_length: config.max_length,
             strategy: TruncationStrategy::LongestFirst,
             ..Default::default()
-        }));
+        })) {
+            return Err(TokenizerError::Tokenize(err.to_string()));
+        }
         Ok(Self {
             tokenizer,
             max_length: config.max_length,
@@ -126,6 +128,16 @@ impl G2pTokenizer {
             batch_size: inputs.len(),
             max_length: self.max_length,
         })
+    }
+
+    pub fn decode_ids(&self, ids: &[i64], skip_special_tokens: bool) -> Result<String, TokenizerError> {
+        let cleaned = ids
+            .iter()
+            .filter_map(|id| u32::try_from(*id).ok())
+            .collect::<Vec<_>>();
+        self.tokenizer
+            .decode(&cleaned, skip_special_tokens)
+            .map_err(|err| TokenizerError::Tokenize(err.to_string()))
     }
 }
 
@@ -191,6 +203,9 @@ impl Byt5Tokenizer {
     pub fn decode(&self, ids: &[i64], skip_special_tokens: bool) -> String {
         let mut bytes = Vec::with_capacity(ids.len());
         for &token_id in ids {
+            if skip_special_tokens && token_id == self.eos_id {
+                break;
+            }
             if token_id == self.pad_id || token_id == self.eos_id || token_id == self.unk_id {
                 if skip_special_tokens {
                     continue;
@@ -218,6 +233,13 @@ impl TokenizerBackend {
             TokenizerBackend::Json(tokenizer) => tokenizer.encode_batch(inputs),
         }
     }
+
+    pub fn decode_ids(&self, ids: &[i64], skip_special_tokens: bool) -> Result<String, TokenizerError> {
+        match self {
+            TokenizerBackend::Byt5(tokenizer) => Ok(tokenizer.decode(ids, skip_special_tokens)),
+            TokenizerBackend::Json(tokenizer) => tokenizer.decode_ids(ids, skip_special_tokens),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -233,6 +255,11 @@ pub struct TokenizerMetadata {
     pub files: Vec<String>,
     pub sentencepiece_model: Option<String>,
     pub byt5_offset: Option<i64>,
+}
+
+pub struct TokenizerHandle {
+    pub backend: TokenizerBackend,
+    pub metadata: TokenizerMetadata,
 }
 
 pub fn load_tokenizer_metadata(path: impl AsRef<Path>) -> Result<TokenizerMetadata, TokenizerError> {
@@ -251,10 +278,17 @@ pub fn load_tokenizer_backend(
     metadata_path: impl AsRef<Path>,
     max_length: usize,
 ) -> Result<TokenizerBackend, TokenizerError> {
+    Ok(load_tokenizer_handle(metadata_path, max_length)?.backend)
+}
+
+pub fn load_tokenizer_handle(
+    metadata_path: impl AsRef<Path>,
+    max_length: usize,
+) -> Result<TokenizerHandle, TokenizerError> {
     let metadata_path = metadata_path.as_ref();
     let metadata = load_tokenizer_metadata(metadata_path)?;
     let base_dir = metadata_path.parent().unwrap_or_else(|| Path::new("."));
-    if metadata.files.iter().any(|name| name == "tokenizer.json") {
+    let backend = if metadata.files.iter().any(|name| name == "tokenizer.json") {
         let tokenizer_json = base_dir.join("tokenizer.json");
         if !tokenizer_json.exists() {
             return Err(TokenizerError::MissingTokenizerFile(tokenizer_json));
@@ -262,16 +296,16 @@ pub fn load_tokenizer_backend(
         let mut config = TokenizerConfig::new(max_length);
         config.pad_id = metadata.pad_token_id.map(|value| value as u32);
         let tokenizer = G2pTokenizer::from_file(tokenizer_json, config)?;
-        return Ok(TokenizerBackend::Json(tokenizer));
-    }
-    if metadata.byt5_offset.is_some() || metadata.tokenizer_name.contains("byt5") {
-        let tokenizer = Byt5Tokenizer::from_metadata(&metadata, max_length);
-        return Ok(TokenizerBackend::Byt5(tokenizer));
-    }
-    Err(TokenizerError::UnsupportedTokenizer(format!(
-        "Tokenizer {} is not supported yet",
-        metadata.tokenizer_name
-    )))
+        TokenizerBackend::Json(tokenizer)
+    } else if metadata.byt5_offset.is_some() || metadata.tokenizer_name.contains("byt5") {
+        TokenizerBackend::Byt5(Byt5Tokenizer::from_metadata(&metadata, max_length))
+    } else {
+        return Err(TokenizerError::UnsupportedTokenizer(format!(
+            "Tokenizer {} is not supported yet",
+            metadata.tokenizer_name
+        )));
+    };
+    Ok(TokenizerHandle { backend, metadata })
 }
 
 #[cfg(test)]
