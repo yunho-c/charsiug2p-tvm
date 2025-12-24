@@ -144,6 +144,16 @@ def export_torch_model_with_cache(
             super().__init__()
             self.max_cache_len = max_cache_len
 
+        def lazy_initialization(self, key_states: torch.Tensor):
+            self.dtype, self.device = key_states.dtype, key_states.device
+            self.keys = key_states.new_zeros(
+                (key_states.shape[0], key_states.shape[1], self.max_cache_len, key_states.shape[3])
+            )
+            self.values = key_states.new_zeros(
+                (key_states.shape[0], key_states.shape[1], self.max_cache_len, key_states.shape[3])
+            )
+            self.is_initialized = True
+
         def update(
             self,
             key_states: torch.Tensor,
@@ -151,20 +161,33 @@ def export_torch_model_with_cache(
             cache_kwargs: dict[str, object] | None = None,
         ) -> tuple[torch.Tensor, torch.Tensor]:
             if not self.is_initialized:
-                self.dtype, self.device = key_states.dtype, key_states.device
-                self.keys = key_states
-                self.values = value_states
-                self.is_initialized = True
-            else:
-                self.keys = torch.cat([self.keys, key_states], dim=-2)
-                self.values = torch.cat([self.values, value_states], dim=-2)
-            keys, values = self.keys, self.values
-            if self.max_cache_len > 0 and keys.shape[-2] > self.max_cache_len:
-                keys = keys[:, :, -self.max_cache_len :, :]
-                values = values[:, :, -self.max_cache_len :, :]
+                self.lazy_initialization(key_states)
+
+            cache_position = cache_kwargs.get("cache_position") if cache_kwargs is not None else None
+            if cache_position is None or key_states.shape[-2] != 1:
+                keys, values = key_states, value_states
+                if key_states.shape[-2] < self.max_cache_len:
+                    pad_len = self.max_cache_len - key_states.shape[-2]
+                    pad_shape = (key_states.shape[0], key_states.shape[1], pad_len, key_states.shape[3])
+                    pad_k = key_states.new_zeros(pad_shape)
+                    pad_v = value_states.new_zeros(pad_shape)
+                    keys = torch.cat([key_states, pad_k], dim=-2)
+                    values = torch.cat([value_states, pad_v], dim=-2)
+                elif key_states.shape[-2] > self.max_cache_len:
+                    keys = key_states[:, :, -self.max_cache_len :, :]
+                    values = value_states[:, :, -self.max_cache_len :, :]
                 self.keys = keys
                 self.values = values
-            return keys, values
+                return self.keys, self.values
+
+            pos = cache_position.to(torch.int64).view(1, 1, 1, 1)
+            positions = torch.arange(self.max_cache_len, device=key_states.device).view(1, 1, -1, 1)
+            mask = positions == pos
+            key_broadcast = key_states.expand(-1, -1, self.max_cache_len, -1)
+            value_broadcast = value_states.expand(-1, -1, self.max_cache_len, -1)
+            self.keys = torch.where(mask, key_broadcast, self.keys)
+            self.values = torch.where(mask, value_broadcast, self.values)
+            return self.keys, self.values
 
     class ExportEncoderDecoderCache(EncoderDecoderCache):
         def __init__(self, self_cache: Cache, cross_cache: Cache, cur_pos: torch.Tensor):
@@ -196,10 +219,14 @@ def export_torch_model_with_cache(
             encoder_attention_mask: torch.Tensor,
         ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
             past_key_values = self._init_cache(encoder_hidden_states.device, encoder_hidden_states.dtype)
+            positions = torch.arange(max_output_len, device=decoder_input_ids.device)
+            valid = positions < decoder_input_ids.shape[1]
+            decoder_attention_mask = valid.to(torch.long).unsqueeze(0).expand(decoder_input_ids.shape[0], -1)
             cache_position = torch.arange(decoder_input_ids.shape[1], device=decoder_input_ids.device)
             past_key_values.cur_pos = cache_position[-1] + 1
             outputs = self.decoder(
                 input_ids=decoder_input_ids,
+                attention_mask=decoder_attention_mask,
                 encoder_hidden_states=encoder_hidden_states,
                 encoder_attention_mask=encoder_attention_mask,
                 past_key_values=past_key_values,
@@ -248,12 +275,17 @@ def export_torch_model_with_cache(
             past_key_values = self._init_cache(encoder_hidden_states.device, encoder_hidden_states.dtype, cur_pos)
             for layer_idx in range(num_layers):
                 past_key_values.self_attention_cache.update(past_k[layer_idx], past_v[layer_idx], layer_idx)
+            positions = torch.arange(max_output_len, device=decoder_input_ids.device)
+            max_pos = cur_pos.to(torch.int64) + decoder_input_ids.shape[1]
+            valid = positions < max_pos
+            decoder_attention_mask = valid.to(torch.long).unsqueeze(0).expand(decoder_input_ids.shape[0], -1)
             pos_offset = torch.zeros(
                 (decoder_input_ids.shape[1],), device=decoder_input_ids.device, dtype=torch.int64
             )
             cache_position = pos_offset + cur_pos.to(torch.int64)
             outputs = self.decoder(
                 input_ids=decoder_input_ids,
+                attention_mask=decoder_attention_mask,
                 encoder_hidden_states=encoder_hidden_states,
                 encoder_attention_mask=encoder_attention_mask,
                 past_key_values=past_key_values,
