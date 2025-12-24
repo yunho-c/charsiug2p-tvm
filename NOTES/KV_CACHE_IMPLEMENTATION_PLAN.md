@@ -98,3 +98,9 @@ This avoids Python lists of tuples in the exported graph and keeps shapes static
 2) Wire prefill only and validate logits equivalence.
 3) Add step function and update runtime loop.
 4) Turn on `verify` and check exact match + CER.
+
+## Implementation status (current)
+
+- `export_torch_model_with_cache` now exports a prefill module with a 1-token prefix and a step module that uses a dynamic cache length for the past key/value tensors.
+- Runtime uses the prefill/step outputs directly (cache grows each step) via `tvm_g2p_cached`.
+- Remaining risk: verify that Relax + `from_exported_program` can lower dynamic cache dimensions; if not, we may need to revert to fixed cache tensors plus explicit slicing in the wrapper.

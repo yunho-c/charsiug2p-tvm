@@ -11,7 +11,7 @@ from charsiug2p_tvm import __version__
 from charsiug2p_tvm.config import DEFAULT_CONFIG, TARGET_CONFIGS, default_device_for_target, resolve_target
 from charsiug2p_tvm.harness import reference_g2p
 from charsiug2p_tvm.tvm_compile import compile_tvm_module, default_output_dir
-from charsiug2p_tvm.tvm_runtime import tvm_g2p
+from charsiug2p_tvm.tvm_runtime import tvm_g2p, tvm_g2p_cached
 from charsiug2p_tvm.eval import evaluate_against_reference, prepare_samples
 from charsiug2p_tvm.profile import parse_targets, profile_targets, write_profile_csv
 
@@ -81,6 +81,11 @@ def compile_model(
         "--fp16-input",
         help="Function parameter name to cast to fp16 (repeatable).",
     ),
+    use_kv_cache: bool = typer.Option(
+        False,
+        "--kv-cache/--no-kv-cache",
+        help="Compile experimental KV-cache prefill/step modules.",
+    ),
 ) -> None:
     """Compile encoder/decoder modules into TVM runtime artifacts."""
     resolved = resolve_target(target, output_ext=output_ext)
@@ -105,6 +110,7 @@ def compile_model(
         mixed_precision=mixed_precision,
         mixed_precision_out_dtype=mixed_precision_out_dtype,
         fp16_input_names=fp16_input_names,
+        use_kv_cache=use_kv_cache,
     )
     table = Table(title="TVM Compile Outputs", show_header=True, header_style="bold")
     table.add_column("Module", style="cyan")
@@ -165,11 +171,17 @@ def run_tvm_model(
         None,
         help="TVM device string (e.g., cpu, cuda, metal). Defaults by target.",
     ),
+    use_kv_cache: bool = typer.Option(
+        False,
+        "--kv-cache/--no-kv-cache",
+        help="Use experimental KV-cache prefill/step artifacts.",
+    ),
 ) -> None:
     """Run G2P inference using compiled TVM artifacts."""
     if device is None:
         device = default_device_for_target(target)
-    phones = tvm_g2p(
+    runner = tvm_g2p_cached if use_kv_cache else tvm_g2p
+    phones = runner(
         words,
         lang,
         output_dir=output_dir,
