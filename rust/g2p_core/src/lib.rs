@@ -86,3 +86,35 @@ pub fn prepare_prefixed_words(
     validate_input_bytes(words, &prefixed, max_input_bytes)?;
     Ok(prefixed)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefix_without_space() {
+        let words = vec!["Char".to_string(), "siu".to_string()];
+        let prefixed = add_language_prefix(&words, "eng-us", false);
+        assert_eq!(prefixed, vec!["<eng-us>:Char", "<eng-us>:siu"]);
+    }
+
+    #[test]
+    fn prefix_with_space() {
+        let words = vec!["Char".to_string()];
+        let prefixed = add_language_prefix(&words, "eng-us", true);
+        assert_eq!(prefixed, vec!["<eng-us>: Char"]);
+    }
+
+    #[test]
+    fn validate_input_bytes_rejects_long() {
+        let words = vec!["too-long".to_string()];
+        let prefixed = vec!["<eng-us>:too-long".to_string()];
+        let err = validate_input_bytes(&words, &prefixed, 4).unwrap_err();
+        match err {
+            G2pError::InputTooLong { max_input_bytes, examples } => {
+                assert_eq!(max_input_bytes, 4);
+                assert_eq!(examples[0].0, "too-long");
+            }
+        }
+    }
+}

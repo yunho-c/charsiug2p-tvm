@@ -8,6 +8,7 @@ pub const MAIN_FUNCTION: &str = "main";
 #[derive(Debug)]
 pub enum TvmError {
     MissingArtifact(PathBuf),
+    MissingFunction { module: PathBuf, name: String },
     UnexpectedOutputType(i32),
     Ffi(tvm_ffi::Error),
 }
@@ -16,6 +17,11 @@ impl fmt::Display for TvmError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TvmError::MissingArtifact(path) => write!(f, "Missing artifact: {}", path.display()),
+            TvmError::MissingFunction { module, name } => write!(
+                f,
+                "Function '{name}' not found in module {}. Relax bytecode modules may require VirtualMachine support from libtvm_runtime.",
+                module.display()
+            ),
             TvmError::UnexpectedOutputType(type_index) => {
                 write!(f, "Unexpected output type index: {type_index}")
             }
@@ -84,16 +90,25 @@ impl TvmArtifacts {
 #[derive(Clone)]
 pub struct TvmModule {
     module: Module,
+    path: PathBuf,
 }
 
 impl TvmModule {
     pub fn load(path: &Path) -> Result<Self, TvmError> {
         let module = Module::load_from_file(path.to_string_lossy().as_ref())?;
-        Ok(Self { module })
+        Ok(Self {
+            module,
+            path: path.to_path_buf(),
+        })
     }
 
     pub fn main(&self) -> Result<Function, TvmError> {
-        Ok(self.module.get_function(MAIN_FUNCTION)?)
+        self.module.get_function(MAIN_FUNCTION).map_err(|_error| {
+            TvmError::MissingFunction {
+                module: self.path.clone(),
+                name: MAIN_FUNCTION.to_string(),
+            }
+        })
     }
 }
 
