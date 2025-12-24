@@ -1,0 +1,8 @@
+[package]
+name = "charsiug2p-g2p-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "charsiug2p_g2p_core"
+crate-type = ["lib"]

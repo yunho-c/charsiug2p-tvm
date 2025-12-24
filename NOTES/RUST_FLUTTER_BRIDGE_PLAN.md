@@ -16,7 +16,9 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
 
 - Runtime strategy:
   - Option A (recommended first): Relax VM with a thin C++ wrapper that exposes a C ABI to Rust for load + invoke.
+  - Option A.1: Evaluate the vendored `tvm-ffi` Rust crates (linked to `libtvm_ffi`) to load modules and call packed functions before adding custom FFI.
   - Option B: Compile to AOT and call directly via TVM C runtime (less VM logic).
+  - Note: tvm-ffi's registry may be separate from `libtvm_runtime`, so Relax VM construction might still require the TVM runtime C API or a small C wrapper.
 - Tokenizer strategy:
   - Prefer HuggingFace `tokenizers` crate if `tokenizer.json` is available.
   - If only `tokenizer.model` exists, use a SentencePiece-capable Rust crate.

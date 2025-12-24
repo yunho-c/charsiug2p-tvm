@@ -1,0 +1,3 @@
+[workspace]
+members = ["g2p_core", "g2p_tvm"]
+resolver = "2"
