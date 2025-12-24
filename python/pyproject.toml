@@ -1,14 +1,14 @@
 [project]
 authors = [{name = "Yunho", email = "yhjc2692@gmail.com"}]
 dependencies = [
-  "rich>=13.7",
-  "psutil>=5.9",
-  "ml_dtypes>=0.3",
+  "rich>=14.2",
+  "psutil>=7.2",
+  "ml_dtypes>=0.5.4",
   "numpy>=1.26",
-  "sentencepiece>=0.1.99",
+  "sentencepiece>=0.2.1",
   "torch>=2.2",
-  "transformers>=4.38",
-  "typer>=0.12",
+  "transformers>=4.57.3",
+  "typer>=0.20.1",
 ]
 description = "Python package scaffold for charsiug2p-tvm."
 name = "charsiug2p-tvm"
