@@ -1,0 +1,10 @@
+[package]
+name = "charsiug2p-g2p-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+charsiug2p-g2p-core = { path = "../g2p_core" }
+charsiug2p-g2p-pipeline = { path = "../g2p_pipeline" }
+charsiug2p-g2p-tvm = { path = "../g2p_tvm" }
+clap = { version = "4.5", features = ["derive"] }
