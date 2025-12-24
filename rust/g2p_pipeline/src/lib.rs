@@ -4,6 +4,9 @@ use charsiug2p_g2p_core::{prepare_prefixed_words, G2pConfig, G2pError};
 use charsiug2p_g2p_tokenizer::{load_tokenizer_handle, TokenizerBackend, TokenizerError, TokenizerHandle};
 use charsiug2p_g2p_tvm::{tensor_from_i64, TvmArtifacts, TvmError, TvmExecutable};
 
+mod artifacts;
+pub use artifacts::{ArtifactError, ArtifactResolver, ArtifactRoots, ArtifactSpec};
+
 #[derive(Debug)]
 pub enum PipelineError {
     Tokenizer(TokenizerError),

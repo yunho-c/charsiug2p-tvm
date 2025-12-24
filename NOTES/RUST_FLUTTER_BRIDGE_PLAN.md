@@ -27,6 +27,11 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
   - ByT5 does not ship a vocab/model file; it tokenizes raw UTF-8 bytes with a fixed offset (pad/eos/unk => offset=3).
 - Artifact metadata:
   - Add a small manifest (JSON) alongside compiled artifacts capturing: checkpoint, max_input_bytes, max_output_len, batch_size, dtype, target, output_ext, use_kv_cache, tokenizer files, and a version.
+- Artifact discovery (Rust):
+  - `g2p_pipeline::ArtifactResolver` auto-derives tokenizer metadata and TVM artifact paths using the `dist/{tokenizers,tvm}/<checkpoint_sanitized>` layout.
+  - `ArtifactRoots` supports separate tokenizer/tvm roots so mobile apps can pass per-platform asset storage directories instead of relying on repo-relative paths.
+  - CLI honors `CHARSIUG2P_ASSET_ROOT`, `CHARSIUG2P_TOKENIZER_ROOT`, and `CHARSIUG2P_TVM_ROOT` to keep mobile path injection simple.
+  - Repo root has a `dist` symlink to `python/dist` so Rust tooling matches the Python default layout.
 
 ## Scaffolding (repo layout)
 

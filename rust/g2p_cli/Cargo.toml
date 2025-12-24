@@ -7,4 +7,4 @@ edition = "2021"
 charsiug2p-g2p-core = { path = "../g2p_core" }
 charsiug2p-g2p-pipeline = { path = "../g2p_pipeline" }
 charsiug2p-g2p-tvm = { path = "../g2p_tvm" }
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "env"] }
