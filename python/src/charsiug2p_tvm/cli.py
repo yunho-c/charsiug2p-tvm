@@ -113,6 +113,11 @@ def compile_model(
         "--kv-cache/--no-kv-cache",
         help="Compile experimental KV-cache prefill/step modules.",
     ),
+    skip_dlight_gemv: bool = typer.Option(
+        False,
+        "--skip-dlight-gemv/--no-skip-dlight-gemv",
+        help="Skip the DLight GEMV schedule (GPU workaround).",
+    ),
 ) -> None:
     """Compile encoder/decoder modules into TVM runtime artifacts."""
     sizes = _parse_batch_sizes(batch_sizes)
@@ -143,6 +148,7 @@ def compile_model(
             mixed_precision_out_dtype=mixed_precision_out_dtype,
             fp16_input_names=fp16_input_names,
             use_kv_cache=use_kv_cache,
+            skip_dlight_gemv=skip_dlight_gemv,
         )
         table = Table(title=f"TVM Compile Outputs (batch={size})", show_header=True, header_style="bold")
         table.add_column("Module", style="cyan")

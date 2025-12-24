@@ -14,6 +14,47 @@ class ExportedModules:
     decoder_step: "tvm.IRModule | None" = None
 
 
+def _relax_pipeline_for_target(
+    target: "tvm.target.Target",
+    *,
+    skip_dlight_gemv: bool,
+) -> "tvm.transform.Pass":
+    import tvm
+    import tvm.relax as relax
+
+    if skip_dlight_gemv and target.kind.name in {"cuda", "rocm", "metal", "vulkan", "opencl", "webgpu"}:
+        from tvm import dlight as dl
+        from tvm.relax.backend.gpu_generic import pipeline as gpu_pipeline
+
+        @tvm.transform.module_pass(opt_level=0)
+        def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext):
+            with target:
+                seq = tvm.transform.Sequential(
+                    gpu_pipeline.library_dispatch_passes(target)
+                    + [
+                        relax.transform.LegalizeOps(),
+                        relax.transform.AnnotateTIROpPattern(),
+                        relax.transform.FoldConstant(),
+                        relax.transform.FuseOps(),
+                        relax.transform.FuseTIR(),
+                        dl.ApplyDefaultSchedule(
+                            dl.gpu.Matmul(),
+                            dl.gpu.Reduction(),
+                            dl.gpu.GeneralReduction(),
+                            dl.gpu.Fallback(),
+                        ),
+                    ]
+                    + gpu_pipeline.dataflow_lower_passes(target)
+                    + gpu_pipeline.finalize_passes(target)
+                )
+                mod = seq(mod)
+            return mod
+
+        return _pipeline
+
+    return relax.get_default_pipeline(target)
+
+
 def default_output_dir(
     *,
     checkpoint: str,
@@ -207,7 +248,7 @@ def export_torch_model_with_cache(
             self.config = config
 
         def _init_cache(self, device: torch.device, dtype: torch.dtype) -> EncoderDecoderCache:
-            cur_pos = torch.tensor(0, dtype=torch.int32, device=device)
+            cur_pos = torch.zeros((1,), dtype=torch.int32, device=device)
             self_cache = Cache(layer_class_to_replicate=lambda: ExportDynamicLayer(max_output_len))
             cross_cache = Cache(layer_class_to_replicate=lambda: ExportDynamicLayer(max_input_bytes))
             return ExportEncoderDecoderCache(self_cache, cross_cache, cur_pos)
@@ -223,7 +264,7 @@ def export_torch_model_with_cache(
             valid = positions < decoder_input_ids.shape[1]
             decoder_attention_mask = valid.to(torch.long).unsqueeze(0).expand(decoder_input_ids.shape[0], -1)
             cache_position = torch.arange(decoder_input_ids.shape[1], device=decoder_input_ids.device)
-            past_key_values.cur_pos = cache_position[-1] + 1
+            past_key_values.cur_pos = cache_position[-1:] + 1
             outputs = self.decoder(
                 input_ids=decoder_input_ids,
                 attention_mask=decoder_attention_mask,
@@ -248,7 +289,12 @@ def export_torch_model_with_cache(
                 pad_v = past_v.new_zeros(pad_shape)
                 past_k = torch.cat([past_k, pad_k], dim=-2)
                 past_v = torch.cat([past_v, pad_v], dim=-2)
-            cur_pos = torch.tensor(decoder_input_ids.shape[1], device=decoder_input_ids.device, dtype=torch.int32)
+            cur_pos = torch.full(
+                (1,),
+                decoder_input_ids.shape[1],
+                device=decoder_input_ids.device,
+                dtype=torch.int32,
+            )
             return logits, past_k, past_v, cur_pos
 
     class DecoderStepWrapper(torch.nn.Module):
@@ -320,7 +366,7 @@ def export_torch_model_with_cache(
     step_input_ids = torch.zeros((batch_size, 1), dtype=torch.long)
     past_k = torch.zeros((num_layers, batch_size, num_heads, max_output_len, head_dim), dtype=torch.float32)
     past_v = torch.zeros((num_layers, batch_size, num_heads, max_output_len, head_dim), dtype=torch.float32)
-    cur_pos = torch.tensor(1, dtype=torch.int32)
+    cur_pos = torch.ones((1,), dtype=torch.int32)
     step_ep = torch.export.export(step, (step_input_ids, hidden_state, attention_mask, past_k, past_v, cur_pos))
     step_mod = from_exported_program(step_ep, keep_params_as_input=False)
 
@@ -344,6 +390,7 @@ def compile_tvm_module(
     mixed_precision_out_dtype: str = "float32",
     fp16_input_names: list[str] | None = None,
     use_kv_cache: bool = False,
+    skip_dlight_gemv: bool = False,
 ) -> dict[str, Path]:
     """Compile encoder/decoder modules into TVM runtime artifacts."""
     resolved = resolve_target(target, output_ext=output_ext)
@@ -379,7 +426,7 @@ def compile_tvm_module(
 
     artifacts: dict[str, Path] = {}
     target_obj = resolved.target
-    relax_pipeline = relax.get_default_pipeline(target_obj)
+    relax_pipeline = _relax_pipeline_for_target(target_obj, skip_dlight_gemv=skip_dlight_gemv)
     if mixed_precision:
         fp16_input_names = fp16_input_names or None
         mixed_precision_pipeline = tvm.transform.Sequential(
@@ -425,6 +472,7 @@ def compile_tvm_module(
         f"target_spec={target_obj}",
         f"output_ext={output_ext}",
         f"use_kv_cache={use_kv_cache}",
+        f"skip_dlight_gemv={skip_dlight_gemv}",
         f"mixed_precision={mixed_precision}",
         f"mixed_precision_out_dtype={mixed_precision_out_dtype}",
         f"mixed_precision_fp16_inputs={','.join(fp16_input_names or [])}",

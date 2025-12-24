@@ -38,7 +38,9 @@ charsiug2p-tvm --version
 ```bash
 pixi run python -m charsiug2p_tvm info
 pixi run python -m charsiug2p_tvm run --lang eng-us Char siu
-pixi run python -m charsiug2p_tvm compile --target llvm --output-ext so
+pixi run python -m charsiug2p_tvm compile --target llvm
+# compile with kv-cache optimization enabled
+pixi run python -m charsiug2p_tvm compile --target llvm --kv-cache
 # compile multiple batch sizes (comma-separated or repeatable)
 pixi run python -m charsiug2p_tvm compile --target llvm --batch-sizes 1,4,16
 # run inference using compiled TVM artifacts
