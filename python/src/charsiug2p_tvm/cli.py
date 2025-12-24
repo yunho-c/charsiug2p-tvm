@@ -158,6 +158,11 @@ def export_tokenizer(
         "--ensure-tokenizer-json/--no-ensure-tokenizer-json",
         help="Attempt to emit tokenizer.json when available.",
     ),
+    export_sentencepiece: bool = typer.Option(
+        True,
+        "--sentencepiece/--no-sentencepiece",
+        help="Also export SentencePiece model files if available.",
+    ),
 ) -> None:
     """Export tokenizer assets and metadata for Rust/Flutter use."""
     output_dir = output_dir or default_tokenizer_export_dir(
@@ -170,6 +175,7 @@ def export_tokenizer(
         tokenizer_name=tokenizer_name,
         use_fast=use_fast,
         ensure_tokenizer_json=ensure_tokenizer_json,
+        export_sentencepiece=export_sentencepiece,
     )
     table = Table(title="Tokenizer Export", show_header=True, header_style="bold")
     table.add_column("Key", style="cyan")

@@ -116,3 +116,86 @@ impl G2pTokenizer {
         })
     }
 }
+
+pub struct Byt5Tokenizer {
+    max_length: usize,
+    pad_id: i64,
+    eos_id: i64,
+    unk_id: i64,
+    offset: i64,
+}
+
+impl Byt5Tokenizer {
+    pub fn new(max_length: usize, pad_id: i64, eos_id: i64, unk_id: i64) -> Self {
+        Self {
+            max_length,
+            pad_id,
+            eos_id,
+            unk_id,
+            offset: 3,
+        }
+    }
+
+    pub fn encode_batch(&self, inputs: &[String]) -> Result<TokenizedBatch, TokenizerError> {
+        if inputs.is_empty() {
+            return Err(TokenizerError::EmptyInput);
+        }
+        let mut input_ids = Vec::with_capacity(inputs.len() * self.max_length);
+        let mut attention_mask = Vec::with_capacity(inputs.len() * self.max_length);
+        for text in inputs {
+            let bytes = text.as_bytes();
+            let mut row = Vec::with_capacity(self.max_length);
+            for &byte in bytes.iter().take(self.max_length) {
+                row.push(self.offset + byte as i64);
+            }
+            let pad_len = self.max_length.saturating_sub(row.len());
+            input_ids.extend(row);
+            input_ids.extend(std::iter::repeat(self.pad_id).take(pad_len));
+            attention_mask.extend(std::iter::repeat(1).take(self.max_length - pad_len));
+            attention_mask.extend(std::iter::repeat(0).take(pad_len));
+        }
+        Ok(TokenizedBatch {
+            input_ids,
+            attention_mask,
+            batch_size: inputs.len(),
+            max_length: self.max_length,
+        })
+    }
+
+    pub fn decode(&self, ids: &[i64], skip_special_tokens: bool) -> String {
+        let mut bytes = Vec::with_capacity(ids.len());
+        for &token_id in ids {
+            if token_id == self.pad_id || token_id == self.eos_id || token_id == self.unk_id {
+                if skip_special_tokens {
+                    continue;
+                }
+                continue;
+            }
+            let byte_id = token_id - self.offset;
+            if (0..=255).contains(&byte_id) {
+                bytes.push(byte_id as u8);
+            }
+        }
+        String::from_utf8_lossy(&bytes).to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byt5_encode_single_char() {
+        let tokenizer = Byt5Tokenizer::new(4, 0, 1, 2);
+        let batch = tokenizer.encode_batch(&[String::from("A")]).unwrap();
+        assert_eq!(batch.input_ids[0], 68);
+        assert_eq!(batch.attention_mask, vec![1, 0, 0, 0]);
+    }
+
+    #[test]
+    fn byt5_decode_skips_special() {
+        let tokenizer = Byt5Tokenizer::new(4, 0, 1, 2);
+        let output = tokenizer.decode(&[0, 68, 1, 2], true);
+        assert_eq!(output, "A");
+    }
+}

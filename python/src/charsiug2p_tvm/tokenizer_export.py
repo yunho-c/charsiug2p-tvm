@@ -21,6 +21,8 @@ class TokenizerMetadata:
     eos_token_id: int | None
     special_tokens: dict[str, str | list[str]]
     files: list[str]
+    sentencepiece_model: str | None
+    byt5_offset: int | None
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,7 @@ def export_tokenizer_assets(
     tokenizer_name: str = _DEFAULT_TOKENIZER,
     use_fast: bool = True,
     ensure_tokenizer_json: bool = True,
+    export_sentencepiece: bool = True,
 ) -> TokenizerExportResult:
     output_dir.mkdir(parents=True, exist_ok=True)
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=use_fast)
@@ -51,6 +54,15 @@ def export_tokenizer_assets(
         else:
             tokenizer_json = None
 
+    if export_sentencepiece:
+        slow_tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=False)
+        slow_files = [Path(path) for path in slow_tokenizer.save_pretrained(output_dir)]
+        saved_files.extend(slow_files)
+
+    sentencepiece_model = _find_sentencepiece_model(output_dir)
+    byt5_offset = getattr(tokenizer, "offset", None)
+    if not isinstance(byt5_offset, int):
+        byt5_offset = None
     metadata = TokenizerMetadata(
         tokenizer_name=tokenizer_name,
         is_fast=bool(getattr(tokenizer, "is_fast", False)),
@@ -62,6 +74,8 @@ def export_tokenizer_assets(
         eos_token_id=tokenizer.eos_token_id,
         special_tokens=tokenizer.special_tokens_map,
         files=sorted({path.name for path in saved_files}),
+        sentencepiece_model=sentencepiece_model.name if sentencepiece_model else None,
+        byt5_offset=byt5_offset,
     )
     metadata_path = output_dir / "tokenizer_metadata.json"
     metadata_path.write_text(json.dumps(asdict(metadata), indent=2) + "\n", encoding="utf-8")
@@ -83,3 +97,10 @@ def default_tokenizer_export_dir(
     safe_name = checkpoint.replace("/", "_")
     details = f"in{max_input_bytes}_out{max_output_len}"
     return Path("dist") / "tokenizers" / safe_name / details
+
+
+def _find_sentencepiece_model(output_dir: Path) -> Path | None:
+    candidates = sorted(output_dir.glob("*.model"))
+    if not candidates:
+        return None
+    return candidates[0]
