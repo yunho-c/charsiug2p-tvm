@@ -285,6 +285,11 @@ def profile_tvm(
     tvm_batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Compiled TVM batch size."),
     runs: int = typer.Option(1, help="Number of timed runs to average."),
     warmup: bool = typer.Option(True, help="Run one warmup pass before timing."),
+    use_kv_cache: bool = typer.Option(
+        False,
+        "--kv-cache/--no-kv-cache",
+        help="Use KV-cache prefill/step artifacts for profiling.",
+    ),
     device: str | None = typer.Option(None, help="Override device for all targets."),
     output_file: Path = typer.Option(
         Path("dist/profile_results.csv"),
@@ -308,6 +313,7 @@ def profile_tvm(
         runs=runs,
         warmup=warmup,
         device=device,
+        use_kv_cache=use_kv_cache,
     )
     if not results:
         console.print("[yellow]No samples found; nothing to profile.[/yellow]")
@@ -323,6 +329,8 @@ def profile_tvm(
     table.add_column("Per-sample (ms)", style="white", justify="right")
     table.add_column("Encoder/sample (ms)", style="white", justify="right")
     table.add_column("Decoder/sample (ms)", style="white", justify="right")
+    table.add_column("Steps/sample", style="white", justify="right")
+    table.add_column("Decode ms/step", style="white", justify="right")
     for result in results:
         table.add_row(
             result.target,
@@ -334,6 +342,8 @@ def profile_tvm(
             f"{result.per_sample_ms:.3f}",
             f"{result.encoder_per_sample_ms:.3f}",
             f"{result.decoder_per_sample_ms:.3f}",
+            f"{result.decode_steps_per_sample:.3f}",
+            f"{result.decode_ms_per_step:.4f}",
         )
     console.print(table)
 

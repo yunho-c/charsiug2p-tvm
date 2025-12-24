@@ -47,6 +47,8 @@ pixi run python -m charsiug2p_tvm verify ../external/CharsiuG2P/data/test --limi
 pixi run python -m charsiug2p_tvm profile ../external/CharsiuG2P/data/test --target llvm --runs 3 --limit 100
 # comma-separated targets are also supported
 pixi run python -m charsiug2p_tvm profile ../external/CharsiuG2P/data/test --target llvm,cuda --runs 3 --limit 100
+# profile using KV-cache artifacts
+pixi run python -m charsiug2p_tvm profile ../external/CharsiuG2P/data/test --target llvm --runs 3 --limit 100 --kv-cache
 # or, explicitly specify the output directory
 pixi run python -m charsiug2p_tvm compile --output-dir dist/tvm/byt5_tiny_8 --target llvm --output-ext so
 ```

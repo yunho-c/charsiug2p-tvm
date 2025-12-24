@@ -8,7 +8,7 @@ from typing import Sequence
 
 from charsiug2p_tvm.config import default_device_for_target
 from charsiug2p_tvm.eval import prepare_samples
-from charsiug2p_tvm.tvm_runtime import tvm_g2p, tvm_g2p_timed
+from charsiug2p_tvm.tvm_runtime import tvm_g2p, tvm_g2p_cached, tvm_g2p_cached_timed, tvm_g2p_timed
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,10 @@ class ProfileResult:
     decoder_seconds: float
     encoder_per_sample_ms: float
     decoder_per_sample_ms: float
+    decode_steps: int
+    decode_steps_per_sample: float
+    decode_total_ms: float
+    decode_ms_per_step: float
 
 
 def _default_device_for_target(target: str) -> str:
@@ -44,6 +48,7 @@ def profile_targets(
     runs: int,
     warmup: bool,
     device: str | None,
+    use_kv_cache: bool,
 ) -> list[ProfileResult]:
     samples = prepare_samples(
         path=data_path,
@@ -62,7 +67,8 @@ def profile_targets(
     for target in targets:
         device_name = device or _default_device_for_target(target)
         if warmup:
-            tvm_g2p(
+            warmup_runner = tvm_g2p_cached if use_kv_cache else tvm_g2p
+            warmup_runner(
                 words,
                 lang,
                 checkpoint=checkpoint,
@@ -78,9 +84,12 @@ def profile_targets(
         total = 0.0
         encoder_total = 0.0
         decoder_total = 0.0
+        decode_steps_total = 0
+        decode_total_ms = 0.0
         for _ in range(max(1, runs)):
             start = time.perf_counter()
-            _, timing = tvm_g2p_timed(
+            timed_runner = tvm_g2p_cached_timed if use_kv_cache else tvm_g2p_timed
+            _, timing = timed_runner(
                 words,
                 lang,
                 checkpoint=checkpoint,
@@ -95,6 +104,9 @@ def profile_targets(
             total += time.perf_counter() - start
             encoder_total += timing.encoder_seconds
             decoder_total += timing.decoder_seconds
+            if timing.decode_metrics is not None:
+                decode_steps_total += timing.decode_metrics.steps
+                decode_total_ms += timing.decode_metrics.total_decode_ms
 
         total_avg = total / max(1, runs)
         per_sample_ms = (total_avg / len(words)) * 1000.0
@@ -102,6 +114,10 @@ def profile_targets(
         decoder_avg = decoder_total / max(1, runs)
         encoder_per_sample_ms = (encoder_avg / len(words)) * 1000.0
         decoder_per_sample_ms = (decoder_avg / len(words)) * 1000.0
+        decode_steps_avg = decode_steps_total / max(1, runs)
+        decode_steps_per_sample = decode_steps_avg / len(words)
+        decode_total_ms_avg = decode_total_ms / max(1, runs)
+        decode_ms_per_step = decode_total_ms / decode_steps_total if decode_steps_total else 0.0
         results.append(
             ProfileResult(
                 target=target,
@@ -113,6 +129,10 @@ def profile_targets(
                 decoder_seconds=decoder_avg,
                 encoder_per_sample_ms=encoder_per_sample_ms,
                 decoder_per_sample_ms=decoder_per_sample_ms,
+                decode_steps=int(round(decode_steps_avg)),
+                decode_steps_per_sample=decode_steps_per_sample,
+                decode_total_ms=decode_total_ms_avg,
+                decode_ms_per_step=decode_ms_per_step,
             )
         )
 
@@ -144,6 +164,10 @@ def write_profile_csv(path: Path, results: Sequence[ProfileResult]) -> None:
                 "decoder_seconds",
                 "encoder_per_sample_ms",
                 "decoder_per_sample_ms",
+                "decode_steps",
+                "decode_steps_per_sample",
+                "decode_total_ms",
+                "decode_ms_per_step",
             ]
         )
         for result in results:
@@ -158,5 +182,9 @@ def write_profile_csv(path: Path, results: Sequence[ProfileResult]) -> None:
                     f"{result.decoder_seconds:.6f}",
                     f"{result.encoder_per_sample_ms:.3f}",
                     f"{result.decoder_per_sample_ms:.3f}",
+                    result.decode_steps,
+                    f"{result.decode_steps_per_sample:.4f}",
+                    f"{result.decode_total_ms:.3f}",
+                    f"{result.decode_ms_per_step:.6f}",
                 ]
             )

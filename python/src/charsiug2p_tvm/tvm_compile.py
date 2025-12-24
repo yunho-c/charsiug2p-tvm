@@ -144,23 +144,21 @@ def export_torch_model_with_cache(
             super().__init__()
             self.max_cache_len = max_cache_len
 
-        def lazy_initialization(self, key_states: torch.Tensor):
-            self.dtype, self.device = key_states.dtype, key_states.device
-            self.keys = key_states.new_zeros(
-                (key_states.shape[0], key_states.shape[1], 0, key_states.shape[3])
-            )
-            self.values = key_states.new_zeros(
-                (key_states.shape[0], key_states.shape[1], 0, key_states.shape[3])
-            )
-            self.is_initialized = True
-
         def update(
             self,
             key_states: torch.Tensor,
             value_states: torch.Tensor,
             cache_kwargs: dict[str, object] | None = None,
         ) -> tuple[torch.Tensor, torch.Tensor]:
-            keys, values = super().update(key_states, value_states, cache_kwargs)
+            if not self.is_initialized:
+                self.dtype, self.device = key_states.dtype, key_states.device
+                self.keys = key_states
+                self.values = value_states
+                self.is_initialized = True
+            else:
+                self.keys = torch.cat([self.keys, key_states], dim=-2)
+                self.values = torch.cat([self.values, value_states], dim=-2)
+            keys, values = self.keys, self.values
             if self.max_cache_len > 0 and keys.shape[-2] > self.max_cache_len:
                 keys = keys[:, :, -self.max_cache_len :, :]
                 values = values[:, :, -self.max_cache_len :, :]
@@ -216,6 +214,13 @@ def export_torch_model_with_cache(
             past = outputs.past_key_values
             past_k = torch.stack([kv[0] for kv in past], dim=0)
             past_v = torch.stack([kv[1] for kv in past], dim=0)
+            if past_k.shape[-2] < max_output_len:
+                pad_len = max_output_len - past_k.shape[-2]
+                pad_shape = (num_layers, past_k.shape[1], past_k.shape[2], pad_len, past_k.shape[4])
+                pad_k = past_k.new_zeros(pad_shape)
+                pad_v = past_v.new_zeros(pad_shape)
+                past_k = torch.cat([past_k, pad_k], dim=-2)
+                past_v = torch.cat([past_v, pad_v], dim=-2)
             cur_pos = torch.tensor(decoder_input_ids.shape[1], device=decoder_input_ids.device, dtype=torch.int32)
             return logits, past_k, past_v, cur_pos
 

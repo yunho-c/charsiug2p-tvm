@@ -35,6 +35,14 @@ class RuntimeArtifactsCache:
 class TvmTiming:
     encoder_seconds: float
     decoder_seconds: float
+    decode_metrics: "DecodeMetrics | None" = None
+
+
+@dataclass(frozen=True)
+class DecodeMetrics:
+    steps: int
+    total_decode_ms: float
+    ms_per_step: float
 
 
 def resolve_artifacts(
@@ -210,7 +218,8 @@ def _tvm_g2p_impl(
     collect_timing: bool = False,
 ) -> tuple[list[str], TvmTiming | None]:
     if not words:
-        return [], TvmTiming(0.0, 0.0) if collect_timing else None
+        decode_metrics = DecodeMetrics(0, 0.0, 0.0) if collect_timing else None
+        return [], TvmTiming(0.0, 0.0, decode_metrics) if collect_timing else None
 
     prefixed_words = add_language_prefix(words, lang, space_after_colon=space_after_colon)
     oversized = [
@@ -259,6 +268,7 @@ def _tvm_g2p_impl(
 
     encoder_seconds = 0.0
     decoder_seconds = 0.0
+    decode_steps = 0
     results: list[str] = []
     # Run in fixed-size chunks because the compiled model has a static batch size.
     for start in range(0, len(prefixed_words), batch_size):
@@ -289,7 +299,11 @@ def _tvm_g2p_impl(
         # Greedy decode: fill a fixed-length buffer with next-token argmax.
         decoder_input_ids = np.full((batch_size, max_output_len), decoder_start, dtype="int64")
         finished = np.zeros((batch_size,), dtype=bool)
+        if real_batch < batch_size:
+            finished[real_batch:] = True
         for step in range(1, max_output_len):
+            if collect_timing:
+                decode_steps += int((~finished[:real_batch]).sum())
             if collect_timing:
                 start_time = perf_counter()
                 logits = runtime.decode_logits(decoder_input_ids, encoder_hidden_states, attention_mask)
@@ -312,7 +326,13 @@ def _tvm_g2p_impl(
         # Drop padded rows and keep only real outputs.
         results.extend(decoded[:real_batch])
 
-    timing = TvmTiming(encoder_seconds, decoder_seconds) if collect_timing else None
+    if collect_timing:
+        total_decode_ms = decoder_seconds * 1000.0
+        ms_per_step = total_decode_ms / decode_steps if decode_steps else 0.0
+        decode_metrics = DecodeMetrics(decode_steps, total_decode_ms, ms_per_step)
+        timing = TvmTiming(encoder_seconds, decoder_seconds, decode_metrics)
+    else:
+        timing = None
     return results, timing
 
 
@@ -376,11 +396,11 @@ def tvm_g2p_timed(
         collect_timing=True,
     )
     if timing is None:
-        timing = TvmTiming(0.0, 0.0)
+        timing = TvmTiming(0.0, 0.0, DecodeMetrics(0, 0.0, 0.0))
     return results, timing
 
 
-def tvm_g2p_cached(
+def _tvm_g2p_cached_impl(
     words: Sequence[str],
     lang: str,
     *,
@@ -393,10 +413,12 @@ def tvm_g2p_cached(
     max_output_len: int = DEFAULT_CONFIG.max_output_len,
     space_after_colon: bool = False,
     device: str = "cpu",
-) -> list[str]:
+    collect_timing: bool = False,
+) -> tuple[list[str], TvmTiming | None]:
     """Experimental KV-cache decode path for compiled prefill/step modules."""
     if not words:
-        return []
+        decode_metrics = DecodeMetrics(0, 0.0, 0.0) if collect_timing else None
+        return [], TvmTiming(0.0, 0.0, decode_metrics) if collect_timing else None
 
     prefixed_words = add_language_prefix(words, lang, space_after_colon=space_after_colon)
     oversized = [
@@ -448,6 +470,9 @@ def tvm_g2p_cached(
         pad = np.full(pad_shape, pad_value, dtype=array.dtype)
         return np.concatenate([array, pad], axis=0)
 
+    encoder_seconds = 0.0
+    decoder_seconds = 0.0
+    decode_steps = 0
     results: list[str] = []
     for start in range(0, len(prefixed_words), batch_size):
         batch_words = prefixed_words[start : start + batch_size]
@@ -466,13 +491,26 @@ def tvm_g2p_cached(
         input_ids = pad_to_batch(input_ids, pad_value=0)
         attention_mask = pad_to_batch(attention_mask, pad_value=0)
 
-        encoder_hidden_states = runtime.encode(input_ids, attention_mask)
+        if collect_timing:
+            start_time = perf_counter()
+            encoder_hidden_states = runtime.encode(input_ids, attention_mask)
+            encoder_seconds += perf_counter() - start_time
+        else:
+            encoder_hidden_states = runtime.encode(input_ids, attention_mask)
 
         generated = np.full((batch_size, max_output_len), decoder_start, dtype="int64")
         finished = np.zeros((batch_size,), dtype=bool)
+        if real_batch < batch_size:
+            finished[real_batch:] = True
 
         prefill_ids = generated[:, :1]
-        logits, past_k, past_v, cur_pos = runtime.prefill(prefill_ids, encoder_hidden_states, attention_mask)
+        if collect_timing:
+            start_time = perf_counter()
+            logits, past_k, past_v, cur_pos = runtime.prefill(prefill_ids, encoder_hidden_states, attention_mask)
+            decoder_seconds += perf_counter() - start_time
+            decode_steps += real_batch
+        else:
+            logits, past_k, past_v, cur_pos = runtime.prefill(prefill_ids, encoder_hidden_states, attention_mask)
         logits_np = logits.numpy()
         next_token = logits_np[:, -1].argmax(axis=-1)
         generated[:, 1] = next_token
@@ -482,10 +520,19 @@ def tvm_g2p_cached(
                 finished |= generated[:, step - 1] == eos_token
                 if bool(finished[:real_batch].all()):
                     break
-            step_ids = generated[:, step - 1 : step]
-            logits, past_k, past_v, cur_pos = runtime.step(
-                step_ids, encoder_hidden_states, attention_mask, past_k, past_v, cur_pos
-            )
+            if collect_timing:
+                decode_steps += int((~finished[:real_batch]).sum())
+                start_time = perf_counter()
+                step_ids = generated[:, step - 1 : step]
+                logits, past_k, past_v, cur_pos = runtime.step(
+                    step_ids, encoder_hidden_states, attention_mask, past_k, past_v, cur_pos
+                )
+                decoder_seconds += perf_counter() - start_time
+            else:
+                step_ids = generated[:, step - 1 : step]
+                logits, past_k, past_v, cur_pos = runtime.step(
+                    step_ids, encoder_hidden_states, attention_mask, past_k, past_v, cur_pos
+                )
             logits_np = logits.numpy()
             next_token = logits_np[:, -1].argmax(axis=-1)
             if eos_token is not None:
@@ -495,4 +542,75 @@ def tvm_g2p_cached(
         decoded = tokenizer.batch_decode(generated[:, :max_output_len], skip_special_tokens=True)
         results.extend(decoded[:real_batch])
 
+    if collect_timing:
+        total_decode_ms = decoder_seconds * 1000.0
+        ms_per_step = total_decode_ms / decode_steps if decode_steps else 0.0
+        decode_metrics = DecodeMetrics(decode_steps, total_decode_ms, ms_per_step)
+        timing = TvmTiming(encoder_seconds, decoder_seconds, decode_metrics)
+    else:
+        timing = None
+    return results, timing
+
+
+def tvm_g2p_cached(
+    words: Sequence[str],
+    lang: str,
+    *,
+    output_dir: Path | None = None,
+    checkpoint: str = DEFAULT_CONFIG.checkpoint,
+    target: str = "llvm",
+    output_ext: str | None = None,
+    batch_size: int = DEFAULT_CONFIG.batch_size,
+    max_input_bytes: int = DEFAULT_CONFIG.max_input_bytes,
+    max_output_len: int = DEFAULT_CONFIG.max_output_len,
+    space_after_colon: bool = False,
+    device: str = "cpu",
+) -> list[str]:
+    results, _timing = _tvm_g2p_cached_impl(
+        words,
+        lang,
+        output_dir=output_dir,
+        checkpoint=checkpoint,
+        target=target,
+        output_ext=output_ext,
+        batch_size=batch_size,
+        max_input_bytes=max_input_bytes,
+        max_output_len=max_output_len,
+        space_after_colon=space_after_colon,
+        device=device,
+        collect_timing=False,
+    )
     return results
+
+
+def tvm_g2p_cached_timed(
+    words: Sequence[str],
+    lang: str,
+    *,
+    output_dir: Path | None = None,
+    checkpoint: str = DEFAULT_CONFIG.checkpoint,
+    target: str = "llvm",
+    output_ext: str | None = None,
+    batch_size: int = DEFAULT_CONFIG.batch_size,
+    max_input_bytes: int = DEFAULT_CONFIG.max_input_bytes,
+    max_output_len: int = DEFAULT_CONFIG.max_output_len,
+    space_after_colon: bool = False,
+    device: str = "cpu",
+) -> tuple[list[str], TvmTiming]:
+    results, timing = _tvm_g2p_cached_impl(
+        words,
+        lang,
+        output_dir=output_dir,
+        checkpoint=checkpoint,
+        target=target,
+        output_ext=output_ext,
+        batch_size=batch_size,
+        max_input_bytes=max_input_bytes,
+        max_output_len=max_output_len,
+        space_after_colon=space_after_colon,
+        device=device,
+        collect_timing=True,
+    )
+    if timing is None:
+        timing = TvmTiming(0.0, 0.0, DecodeMetrics(0, 0.0, 0.0))
+    return results, timing
