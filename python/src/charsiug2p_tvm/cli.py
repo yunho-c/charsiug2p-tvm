@@ -109,12 +109,12 @@ def compile_model(
         help="Function parameter name to cast to fp16 (repeatable).",
     ),
     use_kv_cache: bool = typer.Option(
-        False,
+        True,
         "--kv-cache/--no-kv-cache",
         help="Compile experimental KV-cache prefill/step modules.",
     ),
     skip_dlight_gemv: bool = typer.Option(
-        False,
+        True,
         "--skip-dlight-gemv/--no-skip-dlight-gemv",
         help="Skip the DLight GEMV schedule (GPU workaround).",
     ),
