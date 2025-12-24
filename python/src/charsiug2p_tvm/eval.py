@@ -8,7 +8,7 @@ from typing import Iterable, Sequence
 import random
 
 from charsiug2p_tvm.harness import reference_g2p
-from charsiug2p_tvm.tvm_runtime import tvm_g2p, tvm_g2p_cached
+from charsiug2p_tvm.tvm_runtime import tvm_g2p, tvm_g2p_cached, tvm_g2p_cached_multi, tvm_g2p_multi
 
 
 @dataclass(frozen=True)
@@ -93,6 +93,7 @@ def evaluate_against_reference(
     tvm_target: str,
     tvm_output_ext: str | None,
     tvm_batch_size: int,
+    tvm_batch_sizes: Sequence[int] | None,
     ref_batch_size: int,
     ref_device: str,
     tvm_device: str,
@@ -126,23 +127,46 @@ def evaluate_against_reference(
             )
 
         tvm_results: list[str] = []
-        tvm_runner = tvm_g2p_cached if use_kv_cache else tvm_g2p
-        for batch in _batch_words(words, max(ref_batch_size, tvm_batch_size)):
-            tvm_results.extend(
-                tvm_runner(
-                    batch,
-                    lang,
-                    output_dir=tvm_output_dir,
-                    checkpoint=checkpoint,
-                    target=tvm_target,
-                    output_ext=tvm_output_ext,
-                    batch_size=tvm_batch_size,
-                    max_input_bytes=max_input_bytes,
-                    max_output_len=max_output_len,
-                    space_after_colon=space_after_colon,
-                    device=tvm_device,
+        use_multi = bool(tvm_batch_sizes)
+        if use_multi:
+            tvm_runner = tvm_g2p_cached_multi if use_kv_cache else tvm_g2p_multi
+            batch_limit = max(tvm_batch_sizes or [tvm_batch_size])
+        else:
+            tvm_runner = tvm_g2p_cached if use_kv_cache else tvm_g2p
+            batch_limit = max(ref_batch_size, tvm_batch_size)
+        for batch in _batch_words(words, batch_limit):
+            if use_multi:
+                tvm_results.extend(
+                    tvm_runner(
+                        batch,
+                        lang,
+                        batch_sizes=list(tvm_batch_sizes or []),
+                        output_dir=tvm_output_dir,
+                        checkpoint=checkpoint,
+                        target=tvm_target,
+                        output_ext=tvm_output_ext,
+                        max_input_bytes=max_input_bytes,
+                        max_output_len=max_output_len,
+                        space_after_colon=space_after_colon,
+                        device=tvm_device,
+                    )
                 )
-            )
+            else:
+                tvm_results.extend(
+                    tvm_runner(
+                        batch,
+                        lang,
+                        output_dir=tvm_output_dir,
+                        checkpoint=checkpoint,
+                        target=tvm_target,
+                        output_ext=tvm_output_ext,
+                        batch_size=tvm_batch_size,
+                        max_input_bytes=max_input_bytes,
+                        max_output_len=max_output_len,
+                        space_after_colon=space_after_colon,
+                        device=tvm_device,
+                    )
+                )
 
         for sample, ref, tvm in zip(lang_samples, ref_results, tvm_results):
             ref_outputs[(sample.lang, sample.word)] = ref

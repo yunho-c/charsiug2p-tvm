@@ -159,6 +159,7 @@ Interpretation:
 ### 1) Pick target model + constraints
 
 - Decide: checkpoint (`charsiu/g2p_multilingual_byT5_tiny_8_layers_100`), `max_input_bytes`, `max_output_len`, batch size, mobile targets (`iphone`, `android`) plus a dev target (`llvm`).
+- Multi-batch artifacts: compile batches `{1, 4, 16}` and let the runtime pick the smallest batch size that fits each chunk (minimizes padding while keeping static shapes).
 - Acceptance: frozen "contract" (max lengths, dtype, device targets) you can compile against.
 
 ### 2) Build a gold-reference harness (PyTorch)

@@ -8,7 +8,16 @@ from typing import Sequence
 
 from charsiug2p_tvm.config import default_device_for_target
 from charsiug2p_tvm.eval import prepare_samples
-from charsiug2p_tvm.tvm_runtime import tvm_g2p, tvm_g2p_cached, tvm_g2p_cached_timed, tvm_g2p_timed
+from charsiug2p_tvm.tvm_runtime import (
+    tvm_g2p,
+    tvm_g2p_cached,
+    tvm_g2p_cached_timed,
+    tvm_g2p_cached_timed_multi,
+    tvm_g2p_cached_multi,
+    tvm_g2p_timed,
+    tvm_g2p_timed_multi,
+    tvm_g2p_multi,
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +54,7 @@ def profile_targets(
     space_after_colon: bool,
     tvm_output_ext: str | None,
     tvm_batch_size: int,
+    tvm_batch_sizes: Sequence[int] | None,
     runs: int,
     warmup: bool,
     device: str | None,
@@ -66,20 +76,36 @@ def profile_targets(
     results: list[ProfileResult] = []
     for target in targets:
         device_name = device or _default_device_for_target(target)
+        use_multi = bool(tvm_batch_sizes)
         if warmup:
             warmup_runner = tvm_g2p_cached if use_kv_cache else tvm_g2p
-            warmup_runner(
-                words,
-                lang,
-                checkpoint=checkpoint,
-                target=target,
-                output_ext=tvm_output_ext,
-                batch_size=tvm_batch_size,
-                max_input_bytes=max_input_bytes,
-                max_output_len=max_output_len,
-                space_after_colon=space_after_colon,
-                device=device_name,
-            )
+            if use_multi:
+                warmup_runner = tvm_g2p_cached_multi if use_kv_cache else tvm_g2p_multi
+                warmup_runner(
+                    words,
+                    lang,
+                    batch_sizes=list(tvm_batch_sizes or []),
+                    checkpoint=checkpoint,
+                    target=target,
+                    output_ext=tvm_output_ext,
+                    max_input_bytes=max_input_bytes,
+                    max_output_len=max_output_len,
+                    space_after_colon=space_after_colon,
+                    device=device_name,
+                )
+            else:
+                warmup_runner(
+                    words,
+                    lang,
+                    checkpoint=checkpoint,
+                    target=target,
+                    output_ext=tvm_output_ext,
+                    batch_size=tvm_batch_size,
+                    max_input_bytes=max_input_bytes,
+                    max_output_len=max_output_len,
+                    space_after_colon=space_after_colon,
+                    device=device_name,
+                )
 
         total = 0.0
         encoder_total = 0.0
@@ -88,19 +114,34 @@ def profile_targets(
         decode_total_ms = 0.0
         for _ in range(max(1, runs)):
             start = time.perf_counter()
-            timed_runner = tvm_g2p_cached_timed if use_kv_cache else tvm_g2p_timed
-            _, timing = timed_runner(
-                words,
-                lang,
-                checkpoint=checkpoint,
-                target=target,
-                output_ext=tvm_output_ext,
-                batch_size=tvm_batch_size,
-                max_input_bytes=max_input_bytes,
-                max_output_len=max_output_len,
-                space_after_colon=space_after_colon,
-                device=device_name,
-            )
+            if use_multi:
+                timed_runner = tvm_g2p_cached_timed_multi if use_kv_cache else tvm_g2p_timed_multi
+                _, timing = timed_runner(
+                    words,
+                    lang,
+                    batch_sizes=list(tvm_batch_sizes or []),
+                    checkpoint=checkpoint,
+                    target=target,
+                    output_ext=tvm_output_ext,
+                    max_input_bytes=max_input_bytes,
+                    max_output_len=max_output_len,
+                    space_after_colon=space_after_colon,
+                    device=device_name,
+                )
+            else:
+                timed_runner = tvm_g2p_cached_timed if use_kv_cache else tvm_g2p_timed
+                _, timing = timed_runner(
+                    words,
+                    lang,
+                    checkpoint=checkpoint,
+                    target=target,
+                    output_ext=tvm_output_ext,
+                    batch_size=tvm_batch_size,
+                    max_input_bytes=max_input_bytes,
+                    max_output_len=max_output_len,
+                    space_after_colon=space_after_colon,
+                    device=device_name,
+                )
             total += time.perf_counter() - start
             encoder_total += timing.encoder_seconds
             decoder_total += timing.decoder_seconds

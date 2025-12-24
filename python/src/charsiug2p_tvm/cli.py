@@ -11,7 +11,12 @@ from charsiug2p_tvm import __version__
 from charsiug2p_tvm.config import DEFAULT_CONFIG, TARGET_CONFIGS, default_device_for_target, resolve_target
 from charsiug2p_tvm.harness import reference_g2p
 from charsiug2p_tvm.tvm_compile import compile_tvm_module, default_output_dir
-from charsiug2p_tvm.tvm_runtime import tvm_g2p, tvm_g2p_cached
+from charsiug2p_tvm.tvm_runtime import (
+    tvm_g2p,
+    tvm_g2p_cached,
+    tvm_g2p_cached_multi,
+    tvm_g2p_multi,
+)
 from charsiug2p_tvm.eval import evaluate_against_reference, prepare_samples
 from charsiug2p_tvm.profile import parse_targets, profile_targets, write_profile_csv
 
@@ -27,6 +32,23 @@ def _print_config_table() -> None:
     for key, value in config.items():
         table.add_row(str(key), str(value))
     console.print(table)
+
+
+def _parse_batch_sizes(values: list[str] | None) -> list[int]:
+    if not values:
+        return []
+    sizes: list[int] = []
+    for value in values:
+        for part in value.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            sizes.append(int(part))
+    if not sizes:
+        raise ValueError("No batch sizes provided.")
+    if any(size <= 0 for size in sizes):
+        raise ValueError(f"Batch sizes must be positive: {sizes}")
+    return sorted(set(sizes))
 
 
 @app.callback()
@@ -59,6 +81,11 @@ def compile_model(
     ),
     checkpoint: str = typer.Option(DEFAULT_CONFIG.checkpoint, help="HF checkpoint to use."),
     batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Batch size to compile for."),
+    batch_sizes: list[str] | None = typer.Option(
+        None,
+        "--batch-sizes",
+        help="Batch sizes to compile (comma-separated or repeatable).",
+    ),
     max_input_bytes: int = typer.Option(DEFAULT_CONFIG.max_input_bytes, help="Max bytes for prefixed word."),
     max_output_len: int = typer.Option(DEFAULT_CONFIG.max_output_len, help="Max output length."),
     target: str = typer.Option(
@@ -88,36 +115,41 @@ def compile_model(
     ),
 ) -> None:
     """Compile encoder/decoder modules into TVM runtime artifacts."""
+    sizes = _parse_batch_sizes(batch_sizes)
+    if sizes and output_dir is not None:
+        raise typer.BadParameter("Use --output-dir only with a single batch size.")
+
     resolved = resolve_target(target, output_ext=output_ext)
     output_ext = resolved.output_ext
-    if output_dir is None:
-        output_dir = default_output_dir(
+    compile_sizes = sizes or [batch_size]
+    for size in compile_sizes:
+        size_output_dir = output_dir or default_output_dir(
             checkpoint=checkpoint,
             target=resolved.name,
-            batch_size=batch_size,
+            batch_size=size,
             max_input_bytes=max_input_bytes,
             max_output_len=max_output_len,
         )
-    console.print(f"[cyan]Compiling TVM artifacts for {checkpoint}...[/cyan]")
-    artifacts = compile_tvm_module(
-        output_dir=output_dir,
-        checkpoint=checkpoint,
-        batch_size=batch_size,
-        max_input_bytes=max_input_bytes,
-        max_output_len=max_output_len,
-        target=target,
-        output_ext=output_ext,
-        mixed_precision=mixed_precision,
-        mixed_precision_out_dtype=mixed_precision_out_dtype,
-        fp16_input_names=fp16_input_names,
-        use_kv_cache=use_kv_cache,
-    )
-    table = Table(title="TVM Compile Outputs", show_header=True, header_style="bold")
-    table.add_column("Module", style="cyan")
-    table.add_column("Path", style="white")
-    for name, path in artifacts.items():
-        table.add_row(name, str(path))
-    console.print(table)
+        console.print(f"[cyan]Compiling TVM artifacts for {checkpoint} (batch={size})...[/cyan]")
+        artifacts = compile_tvm_module(
+            output_dir=size_output_dir,
+            checkpoint=checkpoint,
+            batch_size=size,
+            max_input_bytes=max_input_bytes,
+            max_output_len=max_output_len,
+            target=target,
+            output_ext=output_ext,
+            mixed_precision=mixed_precision,
+            mixed_precision_out_dtype=mixed_precision_out_dtype,
+            fp16_input_names=fp16_input_names,
+            use_kv_cache=use_kv_cache,
+        )
+        table = Table(title=f"TVM Compile Outputs (batch={size})", show_header=True, header_style="bold")
+        table.add_column("Module", style="cyan")
+        table.add_column("Path", style="white")
+        for name, path in artifacts.items():
+            table.add_row(name, str(path))
+        console.print(table)
 
 
 @app.command("run")
@@ -164,6 +196,11 @@ def run_tvm_model(
     ),
     output_ext: str | None = typer.Option(None, help="Artifact extension (defaults by target)."),
     batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Batch size to run."),
+    batch_sizes: list[str] | None = typer.Option(
+        None,
+        "--batch-sizes",
+        help="Batch sizes to use (comma-separated or repeatable).",
+    ),
     max_input_bytes: int = typer.Option(DEFAULT_CONFIG.max_input_bytes, help="Max bytes for prefixed word."),
     max_output_len: int = typer.Option(DEFAULT_CONFIG.max_output_len, help="Max output length."),
     space_after_colon: bool = typer.Option(False, help="Insert a space after the language prefix."),
@@ -180,20 +217,37 @@ def run_tvm_model(
     """Run G2P inference using compiled TVM artifacts."""
     if device is None:
         device = default_device_for_target(target)
-    runner = tvm_g2p_cached if use_kv_cache else tvm_g2p
-    phones = runner(
-        words,
-        lang,
-        output_dir=output_dir,
-        checkpoint=checkpoint,
-        target=target,
-        output_ext=output_ext,
-        batch_size=batch_size,
-        max_input_bytes=max_input_bytes,
-        max_output_len=max_output_len,
-        space_after_colon=space_after_colon,
-        device=device,
-    )
+    sizes = _parse_batch_sizes(batch_sizes)
+    if sizes:
+        runner = tvm_g2p_cached_multi if use_kv_cache else tvm_g2p_multi
+        phones = runner(
+            words,
+            lang,
+            batch_sizes=sizes,
+            output_dir=output_dir,
+            checkpoint=checkpoint,
+            target=target,
+            output_ext=output_ext,
+            max_input_bytes=max_input_bytes,
+            max_output_len=max_output_len,
+            space_after_colon=space_after_colon,
+            device=device,
+        )
+    else:
+        runner = tvm_g2p_cached if use_kv_cache else tvm_g2p
+        phones = runner(
+            words,
+            lang,
+            output_dir=output_dir,
+            checkpoint=checkpoint,
+            target=target,
+            output_ext=output_ext,
+            batch_size=batch_size,
+            max_input_bytes=max_input_bytes,
+            max_output_len=max_output_len,
+            space_after_colon=space_after_colon,
+            device=device,
+        )
     table = Table(title="CharsiuG2P TVM Output", show_header=True, header_style="bold")
     table.add_column("Word", style="cyan")
     table.add_column("Phonemes", style="white")
@@ -226,6 +280,11 @@ def verify_tvm(
     ),
     tvm_output_ext: str | None = typer.Option(None, help="Artifact extension (defaults by target)."),
     tvm_batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Compiled TVM batch size."),
+    tvm_batch_sizes: list[str] | None = typer.Option(
+        None,
+        "--batch-sizes",
+        help="Batch sizes to use for TVM (comma-separated or repeatable).",
+    ),
     tvm_device: str | None = typer.Option(
         None,
         help="TVM device string (e.g., cpu, cuda, metal). Defaults by target.",
@@ -240,6 +299,7 @@ def verify_tvm(
     """Compare TVM outputs against the reference transformers path."""
     if tvm_device is None:
         tvm_device = default_device_for_target(tvm_target)
+    batch_sizes = _parse_batch_sizes(tvm_batch_sizes)
     samples = prepare_samples(
         path=data_path,
         language=lang,
@@ -258,6 +318,7 @@ def verify_tvm(
         tvm_target=tvm_target,
         tvm_output_ext=tvm_output_ext,
         tvm_batch_size=tvm_batch_size,
+        tvm_batch_sizes=batch_sizes or None,
         ref_batch_size=ref_batch_size,
         ref_device=device,
         tvm_device=tvm_device,
@@ -289,6 +350,11 @@ def profile_tvm(
     space_after_colon: bool = typer.Option(False, help="Insert a space after the language prefix."),
     tvm_output_ext: str | None = typer.Option(None, help="Artifact extension (defaults by target)."),
     tvm_batch_size: int = typer.Option(DEFAULT_CONFIG.batch_size, help="Compiled TVM batch size."),
+    tvm_batch_sizes: list[str] | None = typer.Option(
+        None,
+        "--batch-sizes",
+        help="Batch sizes to use for TVM (comma-separated or repeatable).",
+    ),
     runs: int = typer.Option(1, help="Number of timed runs to average."),
     warmup: bool = typer.Option(True, help="Run one warmup pass before timing."),
     use_kv_cache: bool = typer.Option(
@@ -304,6 +370,7 @@ def profile_tvm(
 ) -> None:
     """Profile TVM inference across multiple targets and write a CSV report."""
     normalized_targets = parse_targets(targets)
+    batch_sizes = _parse_batch_sizes(tvm_batch_sizes)
     results = profile_targets(
         data_path=data_path,
         targets=normalized_targets,
@@ -316,6 +383,7 @@ def profile_tvm(
         space_after_colon=space_after_colon,
         tvm_output_ext=tvm_output_ext,
         tvm_batch_size=tvm_batch_size,
+        tvm_batch_sizes=batch_sizes or None,
         runs=runs,
         warmup=warmup,
         device=device,

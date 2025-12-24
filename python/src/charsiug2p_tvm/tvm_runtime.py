@@ -336,6 +336,20 @@ def _tvm_g2p_impl(
     return results, timing
 
 
+def _pick_batch_size(available: Sequence[int], needed: int) -> int:
+    if not available:
+        raise ValueError("No batch sizes provided.")
+    sizes = sorted(set(available))
+    if sizes[0] <= 0:
+        raise ValueError(f"Invalid batch size: {sizes[0]}.")
+    if needed <= sizes[0]:
+        return sizes[0]
+    for size in sizes:
+        if size >= needed:
+            return size
+    return sizes[-1]
+
+
 def tvm_g2p(
     words: Sequence[str],
     lang: str,
@@ -398,6 +412,57 @@ def tvm_g2p_timed(
     if timing is None:
         timing = TvmTiming(0.0, 0.0, DecodeMetrics(0, 0.0, 0.0))
     return results, timing
+
+
+def tvm_g2p_timed_multi(
+    words: Sequence[str],
+    lang: str,
+    *,
+    batch_sizes: Sequence[int],
+    output_dir: Path | None = None,
+    checkpoint: str = DEFAULT_CONFIG.checkpoint,
+    target: str = "llvm",
+    output_ext: str | None = None,
+    max_input_bytes: int = DEFAULT_CONFIG.max_input_bytes,
+    max_output_len: int = DEFAULT_CONFIG.max_output_len,
+    space_after_colon: bool = False,
+    device: str = "cpu",
+) -> tuple[list[str], TvmTiming]:
+    if not words:
+        return [], TvmTiming(0.0, 0.0, DecodeMetrics(0, 0.0, 0.0))
+    results: list[str] = []
+    encoder_seconds = 0.0
+    decoder_seconds = 0.0
+    decode_steps = 0
+    decode_total_ms = 0.0
+    index = 0
+    while index < len(words):
+        remaining = len(words) - index
+        batch_size = _pick_batch_size(batch_sizes, remaining)
+        chunk = words[index : index + min(remaining, batch_size)]
+        chunk_results, timing = tvm_g2p_timed(
+            chunk,
+            lang,
+            output_dir=output_dir,
+            checkpoint=checkpoint,
+            target=target,
+            output_ext=output_ext,
+            batch_size=batch_size,
+            max_input_bytes=max_input_bytes,
+            max_output_len=max_output_len,
+            space_after_colon=space_after_colon,
+            device=device,
+        )
+        results.extend(chunk_results)
+        encoder_seconds += timing.encoder_seconds
+        decoder_seconds += timing.decoder_seconds
+        if timing.decode_metrics is not None:
+            decode_steps += timing.decode_metrics.steps
+            decode_total_ms += timing.decode_metrics.total_decode_ms
+        index += len(chunk)
+    ms_per_step = decode_total_ms / decode_steps if decode_steps else 0.0
+    decode_metrics = DecodeMetrics(decode_steps, decode_total_ms, ms_per_step)
+    return results, TvmTiming(encoder_seconds, decoder_seconds, decode_metrics)
 
 
 def _tvm_g2p_cached_impl(
@@ -583,6 +648,90 @@ def tvm_g2p_cached(
     return results
 
 
+def tvm_g2p_multi(
+    words: Sequence[str],
+    lang: str,
+    *,
+    batch_sizes: Sequence[int],
+    output_dir: Path | None = None,
+    checkpoint: str = DEFAULT_CONFIG.checkpoint,
+    target: str = "llvm",
+    output_ext: str | None = None,
+    max_input_bytes: int = DEFAULT_CONFIG.max_input_bytes,
+    max_output_len: int = DEFAULT_CONFIG.max_output_len,
+    space_after_colon: bool = False,
+    device: str = "cpu",
+) -> list[str]:
+    """Run inference with multiple compiled batch sizes, picking the smallest that fits."""
+    if not words:
+        return []
+    results: list[str] = []
+    index = 0
+    while index < len(words):
+        remaining = len(words) - index
+        batch_size = _pick_batch_size(batch_sizes, remaining)
+        chunk = words[index : index + min(remaining, batch_size)]
+        results.extend(
+            tvm_g2p(
+                chunk,
+                lang,
+                output_dir=output_dir,
+                checkpoint=checkpoint,
+                target=target,
+                output_ext=output_ext,
+                batch_size=batch_size,
+                max_input_bytes=max_input_bytes,
+                max_output_len=max_output_len,
+                space_after_colon=space_after_colon,
+                device=device,
+            )
+        )
+        index += len(chunk)
+    return results
+
+
+def tvm_g2p_cached_multi(
+    words: Sequence[str],
+    lang: str,
+    *,
+    batch_sizes: Sequence[int],
+    output_dir: Path | None = None,
+    checkpoint: str = DEFAULT_CONFIG.checkpoint,
+    target: str = "llvm",
+    output_ext: str | None = None,
+    max_input_bytes: int = DEFAULT_CONFIG.max_input_bytes,
+    max_output_len: int = DEFAULT_CONFIG.max_output_len,
+    space_after_colon: bool = False,
+    device: str = "cpu",
+) -> list[str]:
+    """Run KV-cache inference with multiple compiled batch sizes."""
+    if not words:
+        return []
+    results: list[str] = []
+    index = 0
+    while index < len(words):
+        remaining = len(words) - index
+        batch_size = _pick_batch_size(batch_sizes, remaining)
+        chunk = words[index : index + min(remaining, batch_size)]
+        results.extend(
+            tvm_g2p_cached(
+                chunk,
+                lang,
+                output_dir=output_dir,
+                checkpoint=checkpoint,
+                target=target,
+                output_ext=output_ext,
+                batch_size=batch_size,
+                max_input_bytes=max_input_bytes,
+                max_output_len=max_output_len,
+                space_after_colon=space_after_colon,
+                device=device,
+            )
+        )
+        index += len(chunk)
+    return results
+
+
 def tvm_g2p_cached_timed(
     words: Sequence[str],
     lang: str,
@@ -614,3 +763,54 @@ def tvm_g2p_cached_timed(
     if timing is None:
         timing = TvmTiming(0.0, 0.0, DecodeMetrics(0, 0.0, 0.0))
     return results, timing
+
+
+def tvm_g2p_cached_timed_multi(
+    words: Sequence[str],
+    lang: str,
+    *,
+    batch_sizes: Sequence[int],
+    output_dir: Path | None = None,
+    checkpoint: str = DEFAULT_CONFIG.checkpoint,
+    target: str = "llvm",
+    output_ext: str | None = None,
+    max_input_bytes: int = DEFAULT_CONFIG.max_input_bytes,
+    max_output_len: int = DEFAULT_CONFIG.max_output_len,
+    space_after_colon: bool = False,
+    device: str = "cpu",
+) -> tuple[list[str], TvmTiming]:
+    if not words:
+        return [], TvmTiming(0.0, 0.0, DecodeMetrics(0, 0.0, 0.0))
+    results: list[str] = []
+    encoder_seconds = 0.0
+    decoder_seconds = 0.0
+    decode_steps = 0
+    decode_total_ms = 0.0
+    index = 0
+    while index < len(words):
+        remaining = len(words) - index
+        batch_size = _pick_batch_size(batch_sizes, remaining)
+        chunk = words[index : index + min(remaining, batch_size)]
+        chunk_results, timing = tvm_g2p_cached_timed(
+            chunk,
+            lang,
+            output_dir=output_dir,
+            checkpoint=checkpoint,
+            target=target,
+            output_ext=output_ext,
+            batch_size=batch_size,
+            max_input_bytes=max_input_bytes,
+            max_output_len=max_output_len,
+            space_after_colon=space_after_colon,
+            device=device,
+        )
+        results.extend(chunk_results)
+        encoder_seconds += timing.encoder_seconds
+        decoder_seconds += timing.decoder_seconds
+        if timing.decode_metrics is not None:
+            decode_steps += timing.decode_metrics.steps
+            decode_total_ms += timing.decode_metrics.total_decode_ms
+        index += len(chunk)
+    ms_per_step = decode_total_ms / decode_steps if decode_steps else 0.0
+    decode_metrics = DecodeMetrics(decode_steps, decode_total_ms, ms_per_step)
+    return results, TvmTiming(encoder_seconds, decoder_seconds, decode_metrics)
