@@ -8,7 +8,7 @@ from typing import Iterable, Sequence
 import random
 
 from charsiug2p_tvm.harness import reference_g2p
-from charsiug2p_tvm.tvm_runtime import tvm_g2p
+from charsiug2p_tvm.tvm_runtime import tvm_g2p, tvm_g2p_cached
 
 
 @dataclass(frozen=True)
@@ -96,6 +96,7 @@ def evaluate_against_reference(
     ref_batch_size: int,
     ref_device: str,
     tvm_device: str,
+    use_kv_cache: bool,
 ) -> EvalMetrics:
     if not samples:
         return EvalMetrics(total=0, exact_match=0, exact_match_rate=0.0, cer=0.0)
@@ -125,9 +126,10 @@ def evaluate_against_reference(
             )
 
         tvm_results: list[str] = []
+        tvm_runner = tvm_g2p_cached if use_kv_cache else tvm_g2p
         for batch in _batch_words(words, max(ref_batch_size, tvm_batch_size)):
             tvm_results.extend(
-                tvm_g2p(
+                tvm_runner(
                     batch,
                     lang,
                     output_dir=tvm_output_dir,

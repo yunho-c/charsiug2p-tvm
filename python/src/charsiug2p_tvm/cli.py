@@ -231,6 +231,11 @@ def verify_tvm(
         help="TVM device string (e.g., cpu, cuda, metal). Defaults by target.",
     ),
     ref_batch_size: int = typer.Option(8, help="Reference batch size."),
+    use_kv_cache: bool = typer.Option(
+        False,
+        "--kv-cache/--no-kv-cache",
+        help="Use KV-cache prefill/step artifacts for TVM evaluation.",
+    ),
 ) -> None:
     """Compare TVM outputs against the reference transformers path."""
     if tvm_device is None:
@@ -256,6 +261,7 @@ def verify_tvm(
         ref_batch_size=ref_batch_size,
         ref_device=device,
         tvm_device=tvm_device,
+        use_kv_cache=use_kv_cache,
     )
     table = Table(title="TVM vs Reference Metrics", show_header=True, header_style="bold")
     table.add_column("Metric", style="cyan")
