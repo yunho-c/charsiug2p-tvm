@@ -51,6 +51,47 @@ def _parse_batch_sizes(values: list[str] | None) -> list[int]:
     return sorted(set(sizes))
 
 
+def _format_list(values: list[object] | None) -> str:
+    if not values:
+        return "(none)"
+    return ", ".join(str(value) for value in values)
+
+
+def _print_compile_diagnostics(
+    *,
+    checkpoint: str,
+    compile_sizes: list[int],
+    max_input_bytes: int,
+    max_output_len: int,
+    target: str,
+    target_spec: object,
+    output_ext: str,
+    output_dir: Path | None,
+    mixed_precision: bool,
+    mixed_precision_out_dtype: str,
+    fp16_input_names: list[str] | None,
+    use_kv_cache: bool,
+    skip_dlight_gemv: bool,
+) -> None:
+    table = Table(title="TVM Compile Diagnostics", show_header=True, header_style="bold")
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="white")
+    table.add_row("checkpoint", checkpoint)
+    table.add_row("batch_sizes", _format_list(compile_sizes))
+    table.add_row("max_input_bytes", str(max_input_bytes))
+    table.add_row("max_output_len", str(max_output_len))
+    table.add_row("target", target)
+    table.add_row("target_spec", str(target_spec))
+    table.add_row("output_ext", output_ext)
+    table.add_row("output_dir", str(output_dir) if output_dir is not None else "(auto)")
+    table.add_row("mixed_precision", str(mixed_precision))
+    table.add_row("mixed_precision_out_dtype", mixed_precision_out_dtype)
+    table.add_row("fp16_inputs", _format_list(fp16_input_names))
+    table.add_row("use_kv_cache", str(use_kv_cache))
+    table.add_row("skip_dlight_gemv", str(skip_dlight_gemv))
+    console.print(table)
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -118,6 +159,12 @@ def compile_model(
         "--skip-dlight-gemv/--no-skip-dlight-gemv",
         help="Skip the DLight GEMV schedule (GPU workaround).",
     ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Suppress compile output.",
+    ),
 ) -> None:
     """Compile encoder/decoder modules into TVM runtime artifacts."""
     sizes = _parse_batch_sizes(batch_sizes)
@@ -127,6 +174,22 @@ def compile_model(
     resolved = resolve_target(target, output_ext=output_ext)
     output_ext = resolved.output_ext
     compile_sizes = sizes or [batch_size]
+    if not quiet:
+        _print_compile_diagnostics(
+            checkpoint=checkpoint,
+            compile_sizes=compile_sizes,
+            max_input_bytes=max_input_bytes,
+            max_output_len=max_output_len,
+            target=target,
+            target_spec=resolved.target,
+            output_ext=output_ext,
+            output_dir=output_dir,
+            mixed_precision=mixed_precision,
+            mixed_precision_out_dtype=mixed_precision_out_dtype,
+            fp16_input_names=fp16_input_names,
+            use_kv_cache=use_kv_cache,
+            skip_dlight_gemv=skip_dlight_gemv,
+        )
     for size in compile_sizes:
         size_output_dir = output_dir or default_output_dir(
             checkpoint=checkpoint,
@@ -135,7 +198,8 @@ def compile_model(
             max_input_bytes=max_input_bytes,
             max_output_len=max_output_len,
         )
-        console.print(f"[cyan]Compiling TVM artifacts for {checkpoint} (batch={size})...[/cyan]")
+        if not quiet:
+            console.print(f"[cyan]Compiling TVM artifacts for {checkpoint} (batch={size})...[/cyan]")
         artifacts = compile_tvm_module(
             output_dir=size_output_dir,
             checkpoint=checkpoint,
@@ -150,12 +214,13 @@ def compile_model(
             use_kv_cache=use_kv_cache,
             skip_dlight_gemv=skip_dlight_gemv,
         )
-        table = Table(title=f"TVM Compile Outputs (batch={size})", show_header=True, header_style="bold")
-        table.add_column("Module", style="cyan")
-        table.add_column("Path", style="white")
-        for name, path in artifacts.items():
-            table.add_row(name, str(path))
-        console.print(table)
+        if not quiet:
+            table = Table(title=f"TVM Compile Outputs (batch={size})", show_header=True, header_style="bold")
+            table.add_column("Module", style="cyan")
+            table.add_column("Path", style="white")
+            for name, path in artifacts.items():
+                table.add_row(name, str(path))
+            console.print(table)
 
 
 @app.command("run")
