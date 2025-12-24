@@ -2,6 +2,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams, TruncationStrategy};
+use serde::Deserialize;
+use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub struct TokenizerConfig {
@@ -32,6 +34,9 @@ pub enum TokenizerError {
     Tokenize(String),
     InvalidLength { expected: usize, got: usize },
     EmptyInput,
+    MetadataLoad { path: PathBuf, message: String },
+    UnsupportedTokenizer(String),
+    MissingTokenizerFile(PathBuf),
 }
 
 impl fmt::Display for TokenizerError {
@@ -45,6 +50,13 @@ impl fmt::Display for TokenizerError {
                 write!(f, "Tokenizer output length {got} does not match expected {expected}")
             }
             TokenizerError::EmptyInput => write!(f, "Tokenizer input is empty"),
+            TokenizerError::MetadataLoad { path, message } => {
+                write!(f, "Failed to load tokenizer metadata from {}: {message}", path.display())
+            }
+            TokenizerError::UnsupportedTokenizer(message) => write!(f, "{message}"),
+            TokenizerError::MissingTokenizerFile(path) => {
+                write!(f, "Tokenizer file not found: {}", path.display())
+            }
         }
     }
 }
@@ -136,6 +148,20 @@ impl Byt5Tokenizer {
         }
     }
 
+    pub fn from_metadata(metadata: &TokenizerMetadata, max_length: usize) -> Self {
+        let pad_id = metadata.pad_token_id.unwrap_or(0);
+        let eos_id = metadata.eos_token_id.unwrap_or(1);
+        let unk_id = metadata.unk_token_id.unwrap_or(2);
+        let offset = metadata.byt5_offset.unwrap_or(3);
+        Self {
+            max_length,
+            pad_id,
+            eos_id,
+            unk_id,
+            offset,
+        }
+    }
+
     pub fn encode_batch(&self, inputs: &[String]) -> Result<TokenizedBatch, TokenizerError> {
         if inputs.is_empty() {
             return Err(TokenizerError::EmptyInput);
@@ -180,6 +206,74 @@ impl Byt5Tokenizer {
     }
 }
 
+pub enum TokenizerBackend {
+    Byt5(Byt5Tokenizer),
+    Json(G2pTokenizer),
+}
+
+impl TokenizerBackend {
+    pub fn encode_batch(&self, inputs: &[String]) -> Result<TokenizedBatch, TokenizerError> {
+        match self {
+            TokenizerBackend::Byt5(tokenizer) => tokenizer.encode_batch(inputs),
+            TokenizerBackend::Json(tokenizer) => tokenizer.encode_batch(inputs),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenizerMetadata {
+    pub tokenizer_name: String,
+    pub is_fast: bool,
+    pub vocab_size: Option<u32>,
+    pub model_max_length: Option<u128>,
+    pub pad_token_id: Option<i64>,
+    pub eos_token_id: Option<i64>,
+    pub unk_token_id: Option<i64>,
+    pub special_tokens: Value,
+    pub files: Vec<String>,
+    pub sentencepiece_model: Option<String>,
+    pub byt5_offset: Option<i64>,
+}
+
+pub fn load_tokenizer_metadata(path: impl AsRef<Path>) -> Result<TokenizerMetadata, TokenizerError> {
+    let path = path.as_ref();
+    let content = std::fs::read_to_string(path).map_err(|err| TokenizerError::MetadataLoad {
+        path: path.to_path_buf(),
+        message: err.to_string(),
+    })?;
+    serde_json::from_str(&content).map_err(|err| TokenizerError::MetadataLoad {
+        path: path.to_path_buf(),
+        message: err.to_string(),
+    })
+}
+
+pub fn load_tokenizer_backend(
+    metadata_path: impl AsRef<Path>,
+    max_length: usize,
+) -> Result<TokenizerBackend, TokenizerError> {
+    let metadata_path = metadata_path.as_ref();
+    let metadata = load_tokenizer_metadata(metadata_path)?;
+    let base_dir = metadata_path.parent().unwrap_or_else(|| Path::new("."));
+    if metadata.files.iter().any(|name| name == "tokenizer.json") {
+        let tokenizer_json = base_dir.join("tokenizer.json");
+        if !tokenizer_json.exists() {
+            return Err(TokenizerError::MissingTokenizerFile(tokenizer_json));
+        }
+        let mut config = TokenizerConfig::new(max_length);
+        config.pad_id = metadata.pad_token_id.map(|value| value as u32);
+        let tokenizer = G2pTokenizer::from_file(tokenizer_json, config)?;
+        return Ok(TokenizerBackend::Json(tokenizer));
+    }
+    if metadata.byt5_offset.is_some() || metadata.tokenizer_name.contains("byt5") {
+        let tokenizer = Byt5Tokenizer::from_metadata(&metadata, max_length);
+        return Ok(TokenizerBackend::Byt5(tokenizer));
+    }
+    Err(TokenizerError::UnsupportedTokenizer(format!(
+        "Tokenizer {} is not supported yet",
+        metadata.tokenizer_name
+    )))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +291,14 @@ mod tests {
         let tokenizer = Byt5Tokenizer::new(4, 0, 1, 2);
         let output = tokenizer.decode(&[0, 68, 1, 2], true);
         assert_eq!(output, "A");
+    }
+
+    #[test]
+    fn byt5_round_trip_multibyte() {
+        let tokenizer = Byt5Tokenizer::new(4, 0, 1, 2);
+        let batch = tokenizer.encode_batch(&[String::from("é")]).unwrap();
+        assert_eq!(batch.input_ids[..4], [198, 172, 0, 0]);
+        let decoded = tokenizer.decode(&batch.input_ids[..2], true);
+        assert_eq!(decoded, "é");
     }
 }

@@ -19,6 +19,7 @@ class TokenizerMetadata:
     model_max_length: int | None
     pad_token_id: int | None
     eos_token_id: int | None
+    unk_token_id: int | None
     special_tokens: dict[str, str | list[str]]
     files: list[str]
     sentencepiece_model: str | None
@@ -72,6 +73,7 @@ def export_tokenizer_assets(
         else None,
         pad_token_id=tokenizer.pad_token_id,
         eos_token_id=tokenizer.eos_token_id,
+        unk_token_id=tokenizer.unk_token_id,
         special_tokens=tokenizer.special_tokens_map,
         files=sorted({path.name for path in saved_files}),
         sentencepiece_model=sentencepiece_model.name if sentencepiece_model else None,
