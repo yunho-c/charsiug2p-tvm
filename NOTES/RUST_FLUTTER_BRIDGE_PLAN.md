@@ -23,6 +23,7 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
   - Prefer HuggingFace `tokenizers` crate if `tokenizer.json` is available.
   - If only `tokenizer.model` exists, use a SentencePiece-capable Rust crate.
   - Export tokenizer assets via Python `AutoTokenizer.save_pretrained(...)` and bundle the resulting files.
+  - Implementation starts with `tokenizer.json` + `tokenizers` crate, and we can add SentencePiece fallback after validation.
 - Artifact metadata:
   - Add a small manifest (JSON) alongside compiled artifacts capturing: checkpoint, max_input_bytes, max_output_len, batch_size, dtype, target, output_ext, use_kv_cache, tokenizer files, and a version.
 

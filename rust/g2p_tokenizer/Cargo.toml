@@ -1,0 +1,11 @@
+[package]
+name = "charsiug2p-g2p-tokenizer"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "charsiug2p_g2p_tokenizer"
+crate-type = ["lib"]
+
+[dependencies]
+tokenizers = "0.15"
