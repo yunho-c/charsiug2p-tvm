@@ -31,6 +31,13 @@ DEFAULT_CONFIG = PortingConfig(
     decode="greedy",
 )
 
+PRETRAINED_CHECKPOINTS: tuple[tuple[str, str], ...] = (
+    ("charsiu/g2p_multilingual_byT5_tiny_8_layers_100", "ByT5 tiny (8-layer), 100 languages"),
+    ("charsiu/g2p_multilingual_byT5_tiny_12_layers_100", "ByT5 tiny (12-layer), 100 languages"),
+    ("charsiu/g2p_multilingual_byT5_tiny_16_layers_100", "ByT5 tiny (16-layer), 100 languages"),
+    ("charsiu/g2p_multilingual_byT5_small_100", "ByT5 small, 100 languages"),
+)
+
 TARGET_CONFIGS: dict[str, TargetPreset] = {
     "llvm": TargetPreset(
         target="llvm -opt-level=3",

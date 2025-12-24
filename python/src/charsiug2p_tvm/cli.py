@@ -8,7 +8,13 @@ from rich.console import Console
 from rich.table import Table
 
 from charsiug2p_tvm import __version__
-from charsiug2p_tvm.config import DEFAULT_CONFIG, TARGET_CONFIGS, default_device_for_target, resolve_target
+from charsiug2p_tvm.config import (
+    DEFAULT_CONFIG,
+    PRETRAINED_CHECKPOINTS,
+    TARGET_CONFIGS,
+    default_device_for_target,
+    resolve_target,
+)
 from charsiug2p_tvm.harness import reference_g2p
 from charsiug2p_tvm.tvm_compile import compile_tvm_module, default_output_dir
 from charsiug2p_tvm.tvm_runtime import (
@@ -111,6 +117,23 @@ def main(
 def info() -> None:
     """Show the current default configuration."""
     _print_config_table()
+
+
+@app.command("list-checkpoints")
+def list_checkpoints() -> None:
+    """List known pretrained checkpoints from the upstream README."""
+    table = Table(
+        title="CharsiuG2P Checkpoints",
+        show_header=True,
+        header_style="bold",
+        caption="Source: external/CharsiuG2P/README.md",
+        caption_style="dim",
+    )
+    table.add_column("Checkpoint", style="cyan")
+    table.add_column("Notes", style="white")
+    for checkpoint, note in PRETRAINED_CHECKPOINTS:
+        table.add_row(checkpoint, note)
+    console.print(table)
 
 
 @app.command("compile")
@@ -280,7 +303,7 @@ def run_tvm_model(
         help="TVM device string (e.g., cpu, cuda, metal). Defaults by target.",
     ),
     use_kv_cache: bool = typer.Option(
-        False,
+        True,
         "--kv-cache/--no-kv-cache",
         help="Use experimental KV-cache prefill/step artifacts.",
     ),
@@ -362,7 +385,7 @@ def verify_tvm(
     ),
     ref_batch_size: int = typer.Option(8, help="Reference batch size."),
     use_kv_cache: bool = typer.Option(
-        False,
+        True,
         "--kv-cache/--no-kv-cache",
         help="Use KV-cache prefill/step artifacts for TVM evaluation.",
     ),
@@ -429,7 +452,7 @@ def profile_tvm(
     runs: int = typer.Option(1, help="Number of timed runs to average."),
     warmup: bool = typer.Option(True, help="Run one warmup pass before timing."),
     use_kv_cache: bool = typer.Option(
-        False,
+        True,
         "--kv-cache/--no-kv-cache",
         help="Use KV-cache prefill/step artifacts for profiling.",
     ),

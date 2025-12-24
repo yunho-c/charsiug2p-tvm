@@ -37,8 +37,11 @@ charsiug2p-tvm --version
 
 ```bash
 pixi run python -m charsiug2p_tvm info
+pixi run python -m charsiug2p_tvm list-checkpoints
 pixi run python -m charsiug2p_tvm run --lang eng-us Char siu
 pixi run python -m charsiug2p_tvm compile --target llvm
+# specify model checkpoint (default: `g2p_multilingual_byT5_tiny_8_layers_100`)
+pixi run python -m charsiug2p_tvm compile --target llvm --checkpoint charsiu/g2p_multilingual_byT5_tiny_12_layers_100
 # compile with kv-cache optimization enabled
 pixi run python -m charsiug2p_tvm compile --target llvm --kv-cache
 # compile multiple batch sizes (comma-separated or repeatable)
