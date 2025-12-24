@@ -101,6 +101,38 @@ This avoids Python lists of tuples in the exported graph and keeps shapes static
 
 ## Implementation status (current)
 
-- `export_torch_model_with_cache` now exports a prefill module with a 1-token prefix and a step module that uses a dynamic cache length for the past key/value tensors.
-- Runtime uses the prefill/step outputs directly (cache grows each step) via `tvm_g2p_cached`.
-- Remaining risk: verify that Relax + `from_exported_program` can lower dynamic cache dimensions; if not, we may need to revert to fixed cache tensors plus explicit slicing in the wrapper.
+- `export_torch_model_with_cache` now exports a prefill module that returns fixed-size caches and a step module that accepts fixed-size caches plus a `cur_pos` input.
+- Prefill uses `Cache(layer_class_to_replicate=ExportDynamicLayer)` with a custom `ExportEncoderDecoderCache` to avoid `torch.export` guards, then sets `cur_pos` from `cache_position[-1] + 1`.
+- Decode step uses fixed-length `past_key_values` (length = `max_output_len`) and a `cur_pos` scalar to update caches; `cache_position` is built from a fixed-length tensor plus `cur_pos` to avoid symbolic-length `arange`.
+- `ExportDynamicLayer` initializes 4D empty tensors for K/V and updates via `torch.cat`, then trims to `max_cache_len` to keep shapes fixed and avoid `index_put`.
+- Runtime (`tvm_runtime.py`) passes `cur_pos` into the step VM call and reuses returned `cur_pos` for the next iteration.
+
+## Known working compile command
+
+- `pixi run python -m charsiug2p_tvm compile --kv-cache --target llvm`
+- Artifacts end up under `python/dist/tvm/charsiu_g2p_multilingual_byT5_tiny_8_layers_100/b1_in64_out128/llvm` (encoder, decoder_prefill, decoder_step).
+
+## Export failure notes (what broke and what fixed it)
+
+- `DynamicCache` starts with 1D empty tensors; `torch.cat` then mixes rank-1 and rank-4 → Relax `concat` error. Fix: custom layer with 4D empty tensors.
+- `StaticCache` updates via `index_copy_`/`index_put` → Relax `index_put` expects full-dim indices. Fix: replace in-place update with `cat` + slice.
+- `EncoderDecoderCache.__init__` calls `get_seq_length()` and converts it to `bool` during export → data-dependent guard error. Fix: minimal subclass that avoids the bool guard and stores `cur_pos` explicitly.
+- `torch.export` specialized `cache_len` to 1 when using dynamic cache length → constraints violation. Fix: use fixed-length caches and carry `cur_pos` as an explicit input.
+- `torch.arange(cur_pos, cur_pos + 1)` created a symbolic-length tensor → guard error. Fix: build `cache_position` from a fixed-size tensor and add `cur_pos`.
+
+## Beginner-friendly explanation (why these changes compile)
+
+TVM’s exporter likes static shapes and simple tensor ops. The original KV-cache path was too dynamic:
+
+- It built caches that *grow* over time.
+- It used in-place index updates (`index_put`) that TVM doesn’t lower well.
+- It created tensors whose length depended on runtime values (`cur_pos`), which triggers export guards.
+
+To make it compile, we made the cache **fixed-size** and moved all “dynamic” behavior into plain tensor math:
+
+- **Fixed-size cache tensors**: we always allocate `[num_layers, batch, num_heads, max_output_len, head_dim]`.
+- **Append via concat + slice**: instead of `index_put`, we `cat` the new token and slice to `max_output_len`.
+- **Track position explicitly**: we carry a small `cur_pos` scalar between steps instead of relying on dynamic shapes.
+- **Avoid symbolic lengths**: `cache_position` is built from a fixed-length tensor plus `cur_pos`, not `arange` of symbolic size.
+
+These changes keep the graph static and predictable while still behaving like a KV-cache at runtime.

@@ -185,12 +185,13 @@ class TvmG2PWithCache:
         encoder_attention_mask: np.ndarray,
         past_k: tvm.runtime.Tensor,
         past_v: tvm.runtime.Tensor,
+        cur_pos: tvm.runtime.Tensor,
     ) -> tuple[tvm.runtime.Tensor, tvm.runtime.Tensor, tvm.runtime.Tensor, tvm.runtime.Tensor]:
         decoder_tensor = _to_tensor(decoder_input_ids, self.device)
         mask_tensor = _to_tensor(encoder_attention_mask, self.device)
-        output = self.step_vm["main"](decoder_tensor, encoder_hidden_states, mask_tensor, past_k, past_v)
-        logits, next_k, next_v, cur_pos = _unwrap_outputs(output, 4)
-        return logits, next_k, next_v, cur_pos  # type: ignore[return-value]
+        output = self.step_vm["main"](decoder_tensor, encoder_hidden_states, mask_tensor, past_k, past_v, cur_pos)
+        logits, next_k, next_v, next_pos = _unwrap_outputs(output, 4)
+        return logits, next_k, next_v, next_pos  # type: ignore[return-value]
 
 
 def _tvm_g2p_impl(
@@ -471,7 +472,7 @@ def tvm_g2p_cached(
         finished = np.zeros((batch_size,), dtype=bool)
 
         prefill_ids = generated[:, :1]
-        logits, past_k, past_v, _ = runtime.prefill(prefill_ids, encoder_hidden_states, attention_mask)
+        logits, past_k, past_v, cur_pos = runtime.prefill(prefill_ids, encoder_hidden_states, attention_mask)
         logits_np = logits.numpy()
         next_token = logits_np[:, -1].argmax(axis=-1)
         generated[:, 1] = next_token
@@ -482,7 +483,9 @@ def tvm_g2p_cached(
                 if bool(finished[:real_batch].all()):
                     break
             step_ids = generated[:, step - 1 : step]
-            logits, past_k, past_v, _ = runtime.step(step_ids, encoder_hidden_states, attention_mask, past_k, past_v)
+            logits, past_k, past_v, cur_pos = runtime.step(
+                step_ids, encoder_hidden_states, attention_mask, past_k, past_v, cur_pos
+            )
             logits_np = logits.numpy()
             next_token = logits_np[:, -1].argmax(axis=-1)
             if eos_token is not None:

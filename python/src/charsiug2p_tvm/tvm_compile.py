@@ -119,6 +119,7 @@ def export_torch_model_with_cache(
 
     import torch
     from transformers import T5ForConditionalGeneration
+    from transformers.cache_utils import Cache, DynamicLayer, EncoderDecoderCache
     from tvm.relax.frontend.torch import from_exported_program
 
     model = T5ForConditionalGeneration.from_pretrained(checkpoint)
@@ -138,6 +139,45 @@ def export_torch_model_with_cache(
             outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask, return_dict=True)
             return outputs.last_hidden_state
 
+    class ExportDynamicLayer(DynamicLayer):
+        def __init__(self, max_cache_len: int):
+            super().__init__()
+            self.max_cache_len = max_cache_len
+
+        def lazy_initialization(self, key_states: torch.Tensor):
+            self.dtype, self.device = key_states.dtype, key_states.device
+            self.keys = key_states.new_zeros(
+                (key_states.shape[0], key_states.shape[1], 0, key_states.shape[3])
+            )
+            self.values = key_states.new_zeros(
+                (key_states.shape[0], key_states.shape[1], 0, key_states.shape[3])
+            )
+            self.is_initialized = True
+
+        def update(
+            self,
+            key_states: torch.Tensor,
+            value_states: torch.Tensor,
+            cache_kwargs: dict[str, object] | None = None,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            keys, values = super().update(key_states, value_states, cache_kwargs)
+            if self.max_cache_len > 0 and keys.shape[-2] > self.max_cache_len:
+                keys = keys[:, :, -self.max_cache_len :, :]
+                values = values[:, :, -self.max_cache_len :, :]
+                self.keys = keys
+                self.values = values
+            return keys, values
+
+    class ExportEncoderDecoderCache(EncoderDecoderCache):
+        def __init__(self, self_cache: Cache, cross_cache: Cache, cur_pos: torch.Tensor):
+            self.self_attention_cache = self_cache
+            self.cross_attention_cache = cross_cache
+            self.cur_pos = cur_pos
+            self.is_updated = {}
+
+        def get_seq_length(self, layer_idx: int = 0) -> torch.Tensor:
+            return self.cur_pos
+
     class DecoderPrefillWrapper(torch.nn.Module):
         def __init__(self, decoder: torch.nn.Module, lm_head: torch.nn.Module, config: object):
             super().__init__()
@@ -145,16 +185,27 @@ def export_torch_model_with_cache(
             self.lm_head = lm_head
             self.config = config
 
+        def _init_cache(self, device: torch.device, dtype: torch.dtype) -> EncoderDecoderCache:
+            cur_pos = torch.tensor(0, dtype=torch.int32, device=device)
+            self_cache = Cache(layer_class_to_replicate=lambda: ExportDynamicLayer(max_output_len))
+            cross_cache = Cache(layer_class_to_replicate=lambda: ExportDynamicLayer(max_input_bytes))
+            return ExportEncoderDecoderCache(self_cache, cross_cache, cur_pos)
+
         def forward(
             self,
             decoder_input_ids: torch.Tensor,
             encoder_hidden_states: torch.Tensor,
             encoder_attention_mask: torch.Tensor,
         ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            past_key_values = self._init_cache(encoder_hidden_states.device, encoder_hidden_states.dtype)
+            cache_position = torch.arange(decoder_input_ids.shape[1], device=decoder_input_ids.device)
+            past_key_values.cur_pos = cache_position[-1] + 1
             outputs = self.decoder(
                 input_ids=decoder_input_ids,
                 encoder_hidden_states=encoder_hidden_states,
                 encoder_attention_mask=encoder_attention_mask,
+                past_key_values=past_key_values,
+                cache_position=cache_position,
                 use_cache=True,
                 return_dict=True,
             )
@@ -175,6 +226,11 @@ def export_torch_model_with_cache(
             self.lm_head = lm_head
             self.config = config
 
+        def _init_cache(self, device: torch.device, dtype: torch.dtype, cur_pos: torch.Tensor) -> EncoderDecoderCache:
+            self_cache = Cache(layer_class_to_replicate=lambda: ExportDynamicLayer(max_output_len))
+            cross_cache = Cache(layer_class_to_replicate=lambda: ExportDynamicLayer(max_input_bytes))
+            return ExportEncoderDecoderCache(self_cache, cross_cache, cur_pos)
+
         def forward(
             self,
             decoder_input_ids: torch.Tensor,
@@ -182,13 +238,21 @@ def export_torch_model_with_cache(
             encoder_attention_mask: torch.Tensor,
             past_k: torch.Tensor,
             past_v: torch.Tensor,
+            cur_pos: torch.Tensor,
         ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-            past = tuple((past_k[i], past_v[i]) for i in range(num_layers))
+            past_key_values = self._init_cache(encoder_hidden_states.device, encoder_hidden_states.dtype, cur_pos)
+            for layer_idx in range(num_layers):
+                past_key_values.self_attention_cache.update(past_k[layer_idx], past_v[layer_idx], layer_idx)
+            pos_offset = torch.zeros(
+                (decoder_input_ids.shape[1],), device=decoder_input_ids.device, dtype=torch.int64
+            )
+            cache_position = pos_offset + cur_pos.to(torch.int64)
             outputs = self.decoder(
                 input_ids=decoder_input_ids,
                 encoder_hidden_states=encoder_hidden_states,
                 encoder_attention_mask=encoder_attention_mask,
-                past_key_values=past,
+                past_key_values=past_key_values,
+                cache_position=cache_position,
                 use_cache=True,
                 return_dict=True,
             )
@@ -199,8 +263,8 @@ def export_torch_model_with_cache(
             past = outputs.past_key_values
             new_k = torch.stack([kv[0] for kv in past], dim=0)
             new_v = torch.stack([kv[1] for kv in past], dim=0)
-            cur_pos = torch.tensor(new_k.shape[3], device=new_k.device, dtype=torch.int32)
-            return logits, new_k, new_v, cur_pos
+            next_pos = cur_pos + decoder_input_ids.shape[1]
+            return logits, new_k, new_v, next_pos
 
     encoder = EncoderWrapper(model.encoder)
     prefill = DecoderPrefillWrapper(model.decoder, model.lm_head, model.config)
@@ -217,16 +281,10 @@ def export_torch_model_with_cache(
     prefill_mod = from_exported_program(prefill_ep, keep_params_as_input=False)
 
     step_input_ids = torch.zeros((batch_size, 1), dtype=torch.long)
-    past_k = torch.zeros((num_layers, batch_size, num_heads, 1, head_dim), dtype=torch.float32)
-    past_v = torch.zeros((num_layers, batch_size, num_heads, 1, head_dim), dtype=torch.float32)
-    # Allow the cache length dimension to grow across decode steps.
-    cache_len = torch.export.Dim("cache_len", min=1, max=max_output_len)
-    step_dynamic_shapes = (None, None, None, {3: cache_len}, {3: cache_len})
-    step_ep = torch.export.export(
-        step,
-        (step_input_ids, hidden_state, attention_mask, past_k, past_v),
-        dynamic_shapes=step_dynamic_shapes,
-    )
+    past_k = torch.zeros((num_layers, batch_size, num_heads, max_output_len, head_dim), dtype=torch.float32)
+    past_v = torch.zeros((num_layers, batch_size, num_heads, max_output_len, head_dim), dtype=torch.float32)
+    cur_pos = torch.tensor(1, dtype=torch.int32)
+    step_ep = torch.export.export(step, (step_input_ids, hidden_state, attention_mask, past_k, past_v, cur_pos))
     step_mod = from_exported_program(step_ep, keep_params_as_input=False)
 
     return ExportedModules(
