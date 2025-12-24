@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -28,6 +29,12 @@ class RuntimeArtifactsCache:
     encoder: Path
     decoder_prefill: Path
     decoder_step: Path
+
+
+@dataclass(frozen=True)
+class TvmTiming:
+    encoder_seconds: float
+    decoder_seconds: float
 
 
 def resolve_artifacts(
@@ -145,7 +152,6 @@ class TvmG2P:
         output = self.decoder_vm["main"](decoder_tensor, encoder_hidden_states, mask_tensor)
         return _unwrap_single(output)
 
-
 class TvmG2PWithCache:
     def __init__(self, encoder_path: Path, prefill_path: Path, step_path: Path, *, device: str = "cpu") -> None:
         self.device = tvm.runtime.device(device, 0)
@@ -187,7 +193,7 @@ class TvmG2PWithCache:
         return logits, next_k, next_v, cur_pos  # type: ignore[return-value]
 
 
-def tvm_g2p(
+def _tvm_g2p_impl(
     words: Sequence[str],
     lang: str,
     *,
@@ -200,9 +206,10 @@ def tvm_g2p(
     max_output_len: int = DEFAULT_CONFIG.max_output_len,
     space_after_colon: bool = False,
     device: str = "cpu",
-) -> list[str]:
+    collect_timing: bool = False,
+) -> tuple[list[str], TvmTiming | None]:
     if not words:
-        return []
+        return [], TvmTiming(0.0, 0.0) if collect_timing else None
 
     prefixed_words = add_language_prefix(words, lang, space_after_colon=space_after_colon)
     oversized = [
@@ -249,6 +256,8 @@ def tvm_g2p(
         pad = np.full(pad_shape, pad_value, dtype=array.dtype)
         return np.concatenate([array, pad], axis=0)
 
+    encoder_seconds = 0.0
+    decoder_seconds = 0.0
     results: list[str] = []
     # Run in fixed-size chunks because the compiled model has a static batch size.
     for start in range(0, len(prefixed_words), batch_size):
@@ -269,14 +278,25 @@ def tvm_g2p(
         input_ids = pad_to_batch(input_ids, pad_value=0)
         attention_mask = pad_to_batch(attention_mask, pad_value=0)
 
-        encoder_hidden_states = runtime.encode(input_ids, attention_mask)
+        if collect_timing:
+            start_time = perf_counter()
+            encoder_hidden_states = runtime.encode(input_ids, attention_mask)
+            encoder_seconds += perf_counter() - start_time
+        else:
+            encoder_hidden_states = runtime.encode(input_ids, attention_mask)
 
         # Greedy decode: fill a fixed-length buffer with next-token argmax.
         decoder_input_ids = np.full((batch_size, max_output_len), decoder_start, dtype="int64")
         finished = np.zeros((batch_size,), dtype=bool)
         for step in range(1, max_output_len):
-            logits = runtime.decode_logits(decoder_input_ids, encoder_hidden_states, attention_mask)
-            logits_np = logits.numpy()
+            if collect_timing:
+                start_time = perf_counter()
+                logits = runtime.decode_logits(decoder_input_ids, encoder_hidden_states, attention_mask)
+                logits_np = logits.numpy()
+                decoder_seconds += perf_counter() - start_time
+            else:
+                logits = runtime.decode_logits(decoder_input_ids, encoder_hidden_states, attention_mask)
+                logits_np = logits.numpy()
             next_token = logits_np[:, step - 1].argmax(axis=-1)
             if eos_token is not None:
                 next_token = np.where(finished, eos_token, next_token)
@@ -291,7 +311,72 @@ def tvm_g2p(
         # Drop padded rows and keep only real outputs.
         results.extend(decoded[:real_batch])
 
+    timing = TvmTiming(encoder_seconds, decoder_seconds) if collect_timing else None
+    return results, timing
+
+
+def tvm_g2p(
+    words: Sequence[str],
+    lang: str,
+    *,
+    output_dir: Path | None = None,
+    checkpoint: str = DEFAULT_CONFIG.checkpoint,
+    target: str = "llvm",
+    output_ext: str | None = None,
+    batch_size: int = DEFAULT_CONFIG.batch_size,
+    max_input_bytes: int = DEFAULT_CONFIG.max_input_bytes,
+    max_output_len: int = DEFAULT_CONFIG.max_output_len,
+    space_after_colon: bool = False,
+    device: str = "cpu",
+) -> list[str]:
+    results, _timing = _tvm_g2p_impl(
+        words,
+        lang,
+        output_dir=output_dir,
+        checkpoint=checkpoint,
+        target=target,
+        output_ext=output_ext,
+        batch_size=batch_size,
+        max_input_bytes=max_input_bytes,
+        max_output_len=max_output_len,
+        space_after_colon=space_after_colon,
+        device=device,
+        collect_timing=False,
+    )
     return results
+
+
+def tvm_g2p_timed(
+    words: Sequence[str],
+    lang: str,
+    *,
+    output_dir: Path | None = None,
+    checkpoint: str = DEFAULT_CONFIG.checkpoint,
+    target: str = "llvm",
+    output_ext: str | None = None,
+    batch_size: int = DEFAULT_CONFIG.batch_size,
+    max_input_bytes: int = DEFAULT_CONFIG.max_input_bytes,
+    max_output_len: int = DEFAULT_CONFIG.max_output_len,
+    space_after_colon: bool = False,
+    device: str = "cpu",
+) -> tuple[list[str], TvmTiming]:
+    results, timing = _tvm_g2p_impl(
+        words,
+        lang,
+        output_dir=output_dir,
+        checkpoint=checkpoint,
+        target=target,
+        output_ext=output_ext,
+        batch_size=batch_size,
+        max_input_bytes=max_input_bytes,
+        max_output_len=max_output_len,
+        space_after_colon=space_after_colon,
+        device=device,
+        collect_timing=True,
+    )
+    if timing is None:
+        timing = TvmTiming(0.0, 0.0)
+    return results, timing
 
 
 def tvm_g2p_cached(
