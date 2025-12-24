@@ -55,6 +55,8 @@ pixi run python -m charsiug2p_tvm profile ../external/CharsiuG2P/data/test --tar
 pixi run python -m charsiug2p_tvm profile ../external/CharsiuG2P/data/test --target llvm,cuda --runs 3 --limit 100
 # profile using multiple compiled batch sizes
 pixi run python -m charsiug2p_tvm profile ../external/CharsiuG2P/data/test --target llvm --runs 3 --limit 100 --batch-sizes 1,4,16
+# profile each batch size separately instead of adaptively selecting
+pixi run python -m charsiug2p_tvm profile ../external/CharsiuG2P/data/test --target llvm --runs 3 --limit 100 --batch-sizes 1,4,16 --profile-batches-separately
 # profile using KV-cache artifacts
 pixi run python -m charsiug2p_tvm profile ../external/CharsiuG2P/data/test --target llvm --runs 3 --limit 100 --kv-cache
 # or, explicitly specify the output directory

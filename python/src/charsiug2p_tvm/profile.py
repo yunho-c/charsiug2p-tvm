@@ -24,6 +24,7 @@ from charsiug2p_tvm.tvm_runtime import (
 class ProfileResult:
     target: str
     device: str
+    batch_size: int | None
     samples: int
     total_seconds: float
     per_sample_ms: float
@@ -59,6 +60,7 @@ def profile_targets(
     warmup: bool,
     device: str | None,
     use_kv_cache: bool,
+    profile_batches_separately: bool,
 ) -> list[ProfileResult]:
     samples = prepare_samples(
         path=data_path,
@@ -77,105 +79,117 @@ def profile_targets(
     for target in targets:
         device_name = device or _default_device_for_target(target)
         use_multi = bool(tvm_batch_sizes)
-        if warmup:
-            warmup_runner = tvm_g2p_cached if use_kv_cache else tvm_g2p
-            if use_multi:
-                warmup_runner = tvm_g2p_cached_multi if use_kv_cache else tvm_g2p_multi
-                warmup_runner(
-                    words,
-                    lang,
-                    batch_sizes=list(tvm_batch_sizes or []),
-                    checkpoint=checkpoint,
-                    target=target,
-                    output_ext=tvm_output_ext,
-                    max_input_bytes=max_input_bytes,
-                    max_output_len=max_output_len,
-                    space_after_colon=space_after_colon,
-                    device=device_name,
-                )
-            else:
-                warmup_runner(
-                    words,
-                    lang,
-                    checkpoint=checkpoint,
-                    target=target,
-                    output_ext=tvm_output_ext,
-                    batch_size=tvm_batch_size,
-                    max_input_bytes=max_input_bytes,
-                    max_output_len=max_output_len,
-                    space_after_colon=space_after_colon,
-                    device=device_name,
-                )
+        batch_variants: list[int | None]
+        if use_multi and profile_batches_separately:
+            batch_variants = list(tvm_batch_sizes or [])
+        else:
+            batch_variants = [None]
 
-        total = 0.0
-        encoder_total = 0.0
-        decoder_total = 0.0
-        decode_steps_total = 0
-        decode_total_ms = 0.0
-        for _ in range(max(1, runs)):
-            start = time.perf_counter()
-            if use_multi:
-                timed_runner = tvm_g2p_cached_timed_multi if use_kv_cache else tvm_g2p_timed_multi
-                _, timing = timed_runner(
-                    words,
-                    lang,
-                    batch_sizes=list(tvm_batch_sizes or []),
-                    checkpoint=checkpoint,
-                    target=target,
-                    output_ext=tvm_output_ext,
-                    max_input_bytes=max_input_bytes,
-                    max_output_len=max_output_len,
-                    space_after_colon=space_after_colon,
-                    device=device_name,
-                )
-            else:
-                timed_runner = tvm_g2p_cached_timed if use_kv_cache else tvm_g2p_timed
-                _, timing = timed_runner(
-                    words,
-                    lang,
-                    checkpoint=checkpoint,
-                    target=target,
-                    output_ext=tvm_output_ext,
-                    batch_size=tvm_batch_size,
-                    max_input_bytes=max_input_bytes,
-                    max_output_len=max_output_len,
-                    space_after_colon=space_after_colon,
-                    device=device_name,
-                )
-            total += time.perf_counter() - start
-            encoder_total += timing.encoder_seconds
-            decoder_total += timing.decoder_seconds
-            if timing.decode_metrics is not None:
-                decode_steps_total += timing.decode_metrics.steps
-                decode_total_ms += timing.decode_metrics.total_decode_ms
+        for batch_variant in batch_variants:
+            if warmup:
+                warmup_runner = tvm_g2p_cached if use_kv_cache else tvm_g2p
+                if use_multi and not profile_batches_separately:
+                    warmup_runner = tvm_g2p_cached_multi if use_kv_cache else tvm_g2p_multi
+                    warmup_runner(
+                        words,
+                        lang,
+                        batch_sizes=list(tvm_batch_sizes or []),
+                        checkpoint=checkpoint,
+                        target=target,
+                        output_ext=tvm_output_ext,
+                        max_input_bytes=max_input_bytes,
+                        max_output_len=max_output_len,
+                        space_after_colon=space_after_colon,
+                        device=device_name,
+                    )
+                else:
+                    warmup_runner(
+                        words,
+                        lang,
+                        checkpoint=checkpoint,
+                        target=target,
+                        output_ext=tvm_output_ext,
+                        batch_size=batch_variant if batch_variant is not None else tvm_batch_size,
+                        max_input_bytes=max_input_bytes,
+                        max_output_len=max_output_len,
+                        space_after_colon=space_after_colon,
+                        device=device_name,
+                    )
 
-        total_avg = total / max(1, runs)
-        per_sample_ms = (total_avg / len(words)) * 1000.0
-        encoder_avg = encoder_total / max(1, runs)
-        decoder_avg = decoder_total / max(1, runs)
-        encoder_per_sample_ms = (encoder_avg / len(words)) * 1000.0
-        decoder_per_sample_ms = (decoder_avg / len(words)) * 1000.0
-        decode_steps_avg = decode_steps_total / max(1, runs)
-        decode_steps_per_sample = decode_steps_avg / len(words)
-        decode_total_ms_avg = decode_total_ms / max(1, runs)
-        decode_ms_per_step = decode_total_ms / decode_steps_total if decode_steps_total else 0.0
-        results.append(
-            ProfileResult(
-                target=target,
-                device=device_name,
-                samples=len(words),
-                total_seconds=total_avg,
-                per_sample_ms=per_sample_ms,
-                encoder_seconds=encoder_avg,
-                decoder_seconds=decoder_avg,
-                encoder_per_sample_ms=encoder_per_sample_ms,
-                decoder_per_sample_ms=decoder_per_sample_ms,
-                decode_steps=int(round(decode_steps_avg)),
-                decode_steps_per_sample=decode_steps_per_sample,
-                decode_total_ms=decode_total_ms_avg,
-                decode_ms_per_step=decode_ms_per_step,
+            total = 0.0
+            encoder_total = 0.0
+            decoder_total = 0.0
+            decode_steps_total = 0
+            decode_total_ms = 0.0
+            for _ in range(max(1, runs)):
+                start = time.perf_counter()
+                if use_multi and not profile_batches_separately:
+                    timed_runner = tvm_g2p_cached_timed_multi if use_kv_cache else tvm_g2p_timed_multi
+                    _, timing = timed_runner(
+                        words,
+                        lang,
+                        batch_sizes=list(tvm_batch_sizes or []),
+                        checkpoint=checkpoint,
+                        target=target,
+                        output_ext=tvm_output_ext,
+                        max_input_bytes=max_input_bytes,
+                        max_output_len=max_output_len,
+                        space_after_colon=space_after_colon,
+                        device=device_name,
+                    )
+                else:
+                    timed_runner = tvm_g2p_cached_timed if use_kv_cache else tvm_g2p_timed
+                    _, timing = timed_runner(
+                        words,
+                        lang,
+                        checkpoint=checkpoint,
+                        target=target,
+                        output_ext=tvm_output_ext,
+                        batch_size=batch_variant if batch_variant is not None else tvm_batch_size,
+                        max_input_bytes=max_input_bytes,
+                        max_output_len=max_output_len,
+                        space_after_colon=space_after_colon,
+                        device=device_name,
+                    )
+                total += time.perf_counter() - start
+                encoder_total += timing.encoder_seconds
+                decoder_total += timing.decoder_seconds
+                if timing.decode_metrics is not None:
+                    decode_steps_total += timing.decode_metrics.steps
+                    decode_total_ms += timing.decode_metrics.total_decode_ms
+
+            total_avg = total / max(1, runs)
+            per_sample_ms = (total_avg / len(words)) * 1000.0
+            encoder_avg = encoder_total / max(1, runs)
+            decoder_avg = decoder_total / max(1, runs)
+            encoder_per_sample_ms = (encoder_avg / len(words)) * 1000.0
+            decoder_per_sample_ms = (decoder_avg / len(words)) * 1000.0
+            decode_steps_avg = decode_steps_total / max(1, runs)
+            decode_steps_per_sample = decode_steps_avg / len(words)
+            decode_total_ms_avg = decode_total_ms / max(1, runs)
+            decode_ms_per_step = decode_total_ms / decode_steps_total if decode_steps_total else 0.0
+            if use_multi:
+                result_batch_size = batch_variant if profile_batches_separately else None
+            else:
+                result_batch_size = tvm_batch_size
+            results.append(
+                ProfileResult(
+                    target=target,
+                    device=device_name,
+                    batch_size=result_batch_size,
+                    samples=len(words),
+                    total_seconds=total_avg,
+                    per_sample_ms=per_sample_ms,
+                    encoder_seconds=encoder_avg,
+                    decoder_seconds=decoder_avg,
+                    encoder_per_sample_ms=encoder_per_sample_ms,
+                    decoder_per_sample_ms=decoder_per_sample_ms,
+                    decode_steps=int(round(decode_steps_avg)),
+                    decode_steps_per_sample=decode_steps_per_sample,
+                    decode_total_ms=decode_total_ms_avg,
+                    decode_ms_per_step=decode_ms_per_step,
+                )
             )
-        )
 
     return results
 
@@ -198,6 +212,7 @@ def write_profile_csv(path: Path, results: Sequence[ProfileResult]) -> None:
             [
                 "target",
                 "device",
+                "batch_size",
                 "samples",
                 "total_seconds",
                 "per_sample_ms",
@@ -212,10 +227,12 @@ def write_profile_csv(path: Path, results: Sequence[ProfileResult]) -> None:
             ]
         )
         for result in results:
+            batch_label = str(result.batch_size) if result.batch_size is not None else "adaptive"
             writer.writerow(
                 [
                     result.target,
                     result.device,
+                    batch_label,
                     result.samples,
                     f"{result.total_seconds:.6f}",
                     f"{result.per_sample_ms:.3f}",

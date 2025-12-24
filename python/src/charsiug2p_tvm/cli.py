@@ -362,6 +362,11 @@ def profile_tvm(
         "--kv-cache/--no-kv-cache",
         help="Use KV-cache prefill/step artifacts for profiling.",
     ),
+    profile_batches_separately: bool = typer.Option(
+        False,
+        "--profile-batches-separately/--profile-batches-combined",
+        help="Profile each batch size separately when using --batch-sizes.",
+    ),
     device: str | None = typer.Option(None, help="Override device for all targets."),
     output_file: Path = typer.Option(
         Path("dist/profile_results.csv"),
@@ -388,6 +393,7 @@ def profile_tvm(
         warmup=warmup,
         device=device,
         use_kv_cache=use_kv_cache,
+        profile_batches_separately=profile_batches_separately,
     )
     if not results:
         console.print("[yellow]No samples found; nothing to profile.[/yellow]")
@@ -396,6 +402,7 @@ def profile_tvm(
     table = Table(title="TVM Profile Results", show_header=True, header_style="bold")
     table.add_column("Target", style="cyan")
     table.add_column("Device", style="white")
+    table.add_column("Batch", style="white", justify="right")
     table.add_column("Samples", style="white", justify="right")
     table.add_column("Total (s)", style="white", justify="right")
     table.add_column("Encoder (s)", style="white", justify="right")
@@ -406,9 +413,11 @@ def profile_tvm(
     table.add_column("Steps/sample", style="white", justify="right")
     table.add_column("Decode ms/step", style="white", justify="right")
     for result in results:
+        batch_label = str(result.batch_size) if result.batch_size is not None else "adaptive"
         table.add_row(
             result.target,
             result.device,
+            batch_label,
             str(result.samples),
             f"{result.total_seconds:.3f}",
             f"{result.encoder_seconds:.3f}",
