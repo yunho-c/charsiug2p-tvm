@@ -3,10 +3,10 @@ use tvm_ffi::Tensor;
 
 #[test]
 fn system_lib_smoke() {
-    let prefix = match std::env::var("G2P_TVM_SYSTEM_LIB_PREFIX") {
+    let prefix = match std::env::var("TVM_SYSTEM_LIB_PREFIX") {
         Ok(value) if !value.trim().is_empty() => value,
         _ => {
-            eprintln!("skipping: set G2P_TVM_SYSTEM_LIB_PREFIX to run the system-lib test");
+            eprintln!("skipping: set TVM_SYSTEM_LIB_PREFIX to run the system-lib test");
             return;
         }
     };

@@ -5,16 +5,27 @@ use std::process::Command;
 fn main() {
     let target = env::var("TARGET").unwrap_or_default();
     let is_ios = target.contains("apple-ios");
-    let static_requested = is_ios || env_flag("G2P_TVM_STATIC_LINK");
+    let static_requested = is_ios || env_flag("TVM_STATIC_LINK") || env_flag("TVM_FFI_STATIC");
+    let diagnostics = env::var("LINK_DIAGNOSTICS")
+        .map(|value| parse_bool(&value))
+        .unwrap_or(true);
 
-    println!("cargo:rerun-if-env-changed=G2P_TVM_SYSTEM_LIB");
-    println!("cargo:rerun-if-env-changed=G2P_TVM_RUNTIME_LIB");
-    println!("cargo:rerun-if-env-changed=G2P_TVM_FFI_LIB_DIR");
-    println!("cargo:rerun-if-env-changed=G2P_TVM_FFI_STATIC_NAME");
-    println!("cargo:rerun-if-env-changed=G2P_TVM_LINK_FFI_TESTING");
-    println!("cargo:rerun-if-env-changed=G2P_TVM_STATIC_LINK");
+    println!("cargo:rerun-if-env-changed=TVM_SYSTEM_LIB");
+    println!("cargo:rerun-if-env-changed=TVM_RUNTIME_LIB");
+    println!("cargo:rerun-if-env-changed=TVM_FFI_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=TVM_FFI_LINK_TESTING");
+    println!("cargo:rerun-if-env-changed=TVM_STATIC_LINK");
+    println!("cargo:rerun-if-env-changed=TVM_FFI_STATIC");
+    println!("cargo:rerun-if-env-changed=LINK_DIAGNOSTICS");
 
-    let ffi_lib_dir = match env::var("G2P_TVM_FFI_LIB_DIR") {
+    emit_diag(
+        diagnostics,
+        format!(
+            "g2p_tvm build: target={target} ios={is_ios} static_link={static_requested}"
+        ),
+    );
+
+    let ffi_lib_dir = match env::var("TVM_FFI_LIB_DIR") {
         Ok(value) => PathBuf::from(value),
         Err(_) => {
             let output = Command::new("tvm-ffi-config")
@@ -37,22 +48,39 @@ fn main() {
     }
     println!("cargo:rustc-link-search=native={}", lib_dir);
 
-    let link_testing = match env::var("G2P_TVM_LINK_FFI_TESTING") {
+    let link_testing = match env::var("TVM_FFI_LINK_TESTING") {
         Ok(value) => parse_bool(&value),
         Err(_) => !static_requested,
     };
-    let ffi_static_name = env::var("G2P_TVM_FFI_STATIC_NAME")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| {
-            if is_ios {
-                "tvm_ffi_static".to_string()
-            } else {
-                "tvm_ffi".to_string()
-            }
-        });
+    let ffi_static_name = "tvm_ffi_static";
+    emit_diag(
+        diagnostics,
+        format!(
+            "g2p_tvm build: tvm-ffi libdir={} mode={} name={} testing={}",
+            ffi_lib_dir.display(),
+            if static_requested { "static" } else { "dynamic" },
+            ffi_static_name,
+            link_testing
+        ),
+    );
     if static_requested {
-        link_static_lib(&ffi_static_name, &ffi_lib_dir);
+        // Duplicate symbol fix: tvm-ffi crate already links this.
+        // link_static_lib(&ffi_static_name, &ffi_lib_dir);
+
+        // check for libbacktrace (often built by tvm-ffi)
+        if let Some(parent) = ffi_lib_dir.parent() {
+            let backtrace_dir = parent.join("libbacktrace").join("lib");
+            if backtrace_dir.join("libbacktrace.a").exists() {
+                 link_static_lib("backtrace", &backtrace_dir);
+                 emit_diag(
+                    diagnostics,
+                    format!(
+                        "g2p_tvm build: found and linked libbacktrace from {}",
+                        backtrace_dir.display()
+                    ),
+                );
+            }
+        }
         if link_testing {
             link_static_lib("tvm_ffi_testing", &ffi_lib_dir);
         }
@@ -73,18 +101,18 @@ fn main() {
     if !static_requested {
         extra_paths.push(ffi_lib_dir.clone());
     }
-    if let Ok(runtime_lib) = env::var("G2P_TVM_RUNTIME_LIB") {
+    if let Ok(runtime_lib) = env::var("TVM_RUNTIME_LIB") {
         let runtime_path = Path::new(&runtime_lib);
         if !runtime_path.exists() {
-            panic!("G2P_TVM_RUNTIME_LIB not found: {runtime_lib}");
+            panic!("TVM_RUNTIME_LIB not found: {runtime_lib}");
         }
         let dir = runtime_path
             .parent()
-            .expect("G2P_TVM_RUNTIME_LIB must have a parent directory");
+            .expect("TVM_RUNTIME_LIB must have a parent directory");
         let (runtime_path, runtime_static) = resolve_runtime_lib(runtime_path, static_requested);
         let stem = runtime_path
             .file_stem()
-            .expect("G2P_TVM_RUNTIME_LIB must have a file stem")
+            .expect("TVM_RUNTIME_LIB must have a file stem")
             .to_string_lossy();
         let lib_name = stem.strip_prefix("lib").unwrap_or(&stem);
         println!("cargo:rerun-if-changed={}", runtime_path.display());
@@ -95,6 +123,19 @@ fn main() {
             extra_paths.push(dir.to_path_buf());
             println!("cargo:rustc-link-lib=dylib={}", lib_name);
         }
+        emit_diag(
+            diagnostics,
+            format!(
+                "g2p_tvm build: tvm runtime mode={} path={}",
+                if runtime_static { "static" } else { "dynamic" },
+                runtime_path.display()
+            ),
+        );
+    } else {
+        emit_diag(
+            diagnostics,
+            "g2p_tvm build: TVM_RUNTIME_LIB not set; skipping libtvm_runtime link",
+        );
     }
 
     if !os_env_var.is_empty() {
@@ -105,33 +146,49 @@ fn main() {
             paths.push(extra.to_string_lossy().to_string());
         }
         let extra_joined = paths.join(separator);
-        if extra_joined.is_empty() {
-            return;
-        }
-        let new_value = if current.is_empty() {
-            extra_joined
+        if !extra_joined.is_empty() {
+            let new_value = if current.is_empty() {
+                extra_joined
+            } else {
+                format!("{current}{separator}{extra_joined}")
+            };
+            println!("cargo:rustc-env={}={}", os_env_var, new_value);
         } else {
-            format!("{current}{separator}{extra_joined}")
-        };
-        println!("cargo:rustc-env={}={}", os_env_var, new_value);
+            emit_diag(
+                diagnostics,
+                "g2p_tvm build: no dynamic library paths to inject for runtime loading",
+            );
+        }
     }
 
-    if let Ok(static_lib) = env::var("G2P_TVM_SYSTEM_LIB") {
+    if let Ok(static_lib) = env::var("TVM_SYSTEM_LIB") {
         let static_path = Path::new(&static_lib);
         if !static_path.exists() {
-            panic!("G2P_TVM_SYSTEM_LIB not found: {static_lib}");
+            panic!("TVM_SYSTEM_LIB not found: {static_lib}");
         }
         let dir = static_path
             .parent()
-            .expect("G2P_TVM_SYSTEM_LIB must have a parent directory");
+            .expect("TVM_SYSTEM_LIB must have a parent directory");
         let stem = static_path
             .file_stem()
-            .expect("G2P_TVM_SYSTEM_LIB must have a file stem")
+            .expect("TVM_SYSTEM_LIB must have a file stem")
             .to_string_lossy();
         let lib_name = stem.strip_prefix("lib").unwrap_or(&stem);
         println!("cargo:rerun-if-changed={}", static_path.display());
         println!("cargo:rustc-link-search=native={}", dir.display());
         link_static_lib(lib_name, dir);
+        emit_diag(
+            diagnostics,
+            format!("g2p_tvm build: system lib path={}", static_path.display()),
+        );
+    }
+
+    if static_requested && target.contains("apple") {
+        link_apple_static_runtime();
+        emit_diag(
+            diagnostics,
+            "g2p_tvm build: linked libc++, libobjc, and Apple GPU frameworks for static runtime",
+        );
     }
 }
 
@@ -156,10 +213,10 @@ fn resolve_runtime_lib(path: &Path, static_requested: bool) -> (PathBuf, bool) {
     }
     let dir = path
         .parent()
-        .expect("G2P_TVM_RUNTIME_LIB must have a parent directory");
+        .expect("TVM_RUNTIME_LIB must have a parent directory");
     let stem = path
         .file_stem()
-        .expect("G2P_TVM_RUNTIME_LIB must have a file stem")
+        .expect("TVM_RUNTIME_LIB must have a file stem")
         .to_string_lossy();
     let lib_name = stem.strip_prefix("lib").unwrap_or(&stem);
     let candidate = dir.join(format!("lib{lib_name}.a"));
@@ -182,5 +239,19 @@ fn link_static_lib(lib_name: &str, dir: &Path) {
         _ => {
             println!("cargo:rustc-link-lib=static:+whole-archive={}", lib_name);
         }
+    }
+}
+
+fn link_apple_static_runtime() {
+    println!("cargo:rustc-link-lib=c++");
+    println!("cargo:rustc-link-lib=objc");
+    println!("cargo:rustc-link-lib=framework=Metal");
+    println!("cargo:rustc-link-lib=framework=Foundation");
+    println!("cargo:rustc-link-lib=framework=MetalPerformanceShaders");
+}
+
+fn emit_diag(message_enabled: bool, message: impl AsRef<str>) {
+    if message_enabled {
+        println!("cargo:warning={}", message.as_ref());
     }
 }

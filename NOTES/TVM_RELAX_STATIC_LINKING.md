@@ -240,9 +240,9 @@ Link it into the Rust crate and run the smoke test:
 
 ```bash
 DYLD_LIBRARY_PATH=/path/to/tvm/build:/path/to/tvm-ffi/build/lib:$DYLD_LIBRARY_PATH \
-G2P_TVM_RUNTIME_LIB=/path/to/tvm/build/libtvm_runtime.dylib \
-G2P_TVM_SYSTEM_LIB=rust/g2p_tvm/system_lib/libg2p_test.a \
-G2P_TVM_SYSTEM_LIB_PREFIX=g2p_test_ \
+TVM_RUNTIME_LIB=/path/to/tvm/build/libtvm_runtime.dylib \
+TVM_SYSTEM_LIB=rust/g2p_tvm/system_lib/libg2p_test.a \
+TVM_SYSTEM_LIB_PREFIX=g2p_test_ \
 cargo test -p charsiug2p-g2p-tvm system_lib_smoke
 ```
 
@@ -274,8 +274,10 @@ The current implementation uses `libtool` for combining static archives, so the 
 - Relax VM deserialization (`ffi.Module.load_from_bytes.relax.VMExecutable`) is registered in `libtvm_runtime` (or `libtvm`), so tvm-ffi alone is insufficient for system-lib execution.
 - Force-loading the static archive is required to keep `__tvm_module_startup` and registration symbols from being stripped; without it, the runtime fails with `vm_load_executable` missing from `<system-lib:...>`.
 - Using `cargo:rustc-link-lib=static:+whole-archive=...` in `rust/g2p_tvm/build.rs` is the reliable way to force-load across dependent crates (the previous `rustc-link-arg=-Wl,-force_load,...` did not propagate to `g2p_cli`).
-- The Rust build now supports `G2P_TVM_RUNTIME_LIB` to link `libtvm_runtime.dylib` and `G2P_TVM_SYSTEM_LIB` to link a static system-lib archive (plus whole-archive semantics).
-- Static linking for the TVM runtime/ffi can be enabled with `G2P_TVM_STATIC_LINK=1`; optionally set `G2P_TVM_FFI_LIB_DIR` (and `G2P_TVM_FFI_STATIC_NAME` on iOS) to point at static tvm-ffi builds. `G2P_TVM_LINK_FFI_TESTING=1` re-enables linking tvm-ffi testing symbols when needed.
+- The Rust build now supports `TVM_RUNTIME_LIB` to link `libtvm_runtime.dylib` and `TVM_SYSTEM_LIB` to link a static system-lib archive (plus whole-archive semantics).
+- Static linking for the TVM runtime/ffi can be enabled with `TVM_STATIC_LINK=1`; optionally set `TVM_FFI_LIB_DIR` to point at static tvm-ffi builds. `TVM_FFI_LINK_TESTING=1` re-enables linking tvm-ffi testing symbols when needed.
+- Set `LINK_DIAGNOSTICS=0` to disable `cargo:warning` diagnostics from `rust/g2p_tvm/build.rs` (they are on by default).
+- On macOS static builds, link `libc++`, `libobjc`, and Apple GPU frameworks (`Metal`, `Foundation`, `MetalPerformanceShaders`) to satisfy TVM runtime dependencies.
 
 ### `system_lib_metadata.json` schema
 
@@ -301,8 +303,30 @@ When KV-cache is enabled, `decoder` is omitted and `decoder_prefill`/`decoder_st
 
 Rust CLI can now opt into system-lib loading (single batch size only):
 
+
+### Resolving Linker Errors (Dec 2025)
+
+When fully statically linking TVM (runtime + FFI + models), we encountered two main classes of linker errors on macOS, which have been resolved in the build script:
+
+1.  **Undefined Symbols (`libbacktrace`):**
+    *   **Error:** Undefined symbols like `_backtrace_create_state` referenced from `libtvm_ffi_static.a`.
+    *   **Cause:** The static TVM FFI library depends on `libbacktrace`, but it wasn't being linked automatically.
+    *   **Fix:** The `g2p_tvm/build.rs` script now detects if `libbacktrace` exists in the `tvm-ffi` build directory (specifically `../libbacktrace/lib/libbacktrace.a`) and links it if found.
+
+2.  **Duplicate Symbols (`tvm_ffi_static`):**
+    *   **Error:** Duplicate symbols for `tvm::ffi::Module::LoadFromFile`, `_TVMFFIFunctionGetGlobal`, etc.
+    *   **Cause:** `libtvm_ffi_static.a` was being linked twice:
+        *   Once by the `tvm-ffi` crate's `build.rs` (via `dependencies` in `Cargo.toml`).
+        *   Once explicitly by `g2p_tvm/build.rs` when `TVM_STATIC_LINK=1` was set.
+    *   **Fix:** We removed the explicit linking of `tvm_ffi` in `g2p_tvm/build.rs`. The crate dependency handles it correctly.
+
+With these fixes, the full static linking command (for testing) looks like this:
+
 ```bash
-G2P_TVM_SYSTEM_LIB=/path/to/libg2p_system_lib.a \
-G2P_TVM_RUNTIME_LIB=/path/to/libtvm_runtime.dylib \
-cargo run -p charsiug2p-g2p-cli -- --system-lib --tvm-target llvm --lang eng-us Char siu
+TVM_FFI_STATIC=1 TVM_STATIC_LINK=1 \
+TVM_FFI_LIB_DIR=/path/to/tvm-ffi/build/lib \
+TVM_RUNTIME_LIB=/path/to/libtvm_runtime.a \
+TVM_SYSTEM_LIB=/path/to/system_lib.a \
+TVM_SYSTEM_LIB_PREFIX=g2p_test_ \
+cargo test -p charsiug2p-g2p-tvm system_lib_smoke
 ```
