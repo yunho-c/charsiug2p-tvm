@@ -268,6 +268,36 @@ py -3.12 -m charsiug2p_tvm compile \
 The metadata JSON contains the prefixes that Rust uses via `ArtifactResolver::resolve_system_lib_prefixes()`.
 The current implementation uses `libtool` for combining static archives, so the one-shot `--system-lib` export is macOS-only for now.
 
+### Additional findings
+
+- The `ffi.SystemLib` entrypoint is registered by tvm-ffi; it returns a `Module` that resolves symbols by prefix (with and without `__tvm_ffi_`).
+- Relax VM deserialization (`ffi.Module.load_from_bytes.relax.VMExecutable`) is registered in `libtvm_runtime` (or `libtvm`), so tvm-ffi alone is insufficient for system-lib execution.
+- Force-loading the static archive is required to keep `__tvm_module_startup` and registration symbols from being stripped; without it, the runtime fails with `vm_load_executable` missing from `<system-lib:...>`.
+- Using `cargo:rustc-link-lib=static:+whole-archive=...` in `rust/g2p_tvm/build.rs` is the reliable way to force-load across dependent crates (the previous `rustc-link-arg=-Wl,-force_load,...` did not propagate to `g2p_cli`).
+- The Rust build now supports `G2P_TVM_RUNTIME_LIB` to link `libtvm_runtime.dylib` and `G2P_TVM_SYSTEM_LIB` to link a static system-lib archive (plus whole-archive semantics).
+
+### `system_lib_metadata.json` schema
+
+```json
+{
+  "archive": "libg2p_system_lib.a",
+  "prefix_base": "g2p_",
+  "prefixes": {
+    "encoder": "g2p_encoder_",
+    "decoder": "g2p_decoder_"
+  },
+  "checkpoint": "charsiu/g2p_multilingual_byT5_tiny_8_layers_100",
+  "batch_size": 1,
+  "max_input_bytes": 64,
+  "max_output_len": 128,
+  "target": "llvm",
+  "output_ext": "so",
+  "use_kv_cache": false
+}
+```
+
+When KV-cache is enabled, `decoder` is omitted and `decoder_prefill`/`decoder_step` are present in `prefixes`.
+
 Rust CLI can now opt into system-lib loading (single batch size only):
 
 ```bash

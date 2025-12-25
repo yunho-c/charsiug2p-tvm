@@ -56,7 +56,6 @@ def _relax_pipeline_for_target(
 ) -> "tvm.transform.Pass":
     import tvm
     import tvm.relax as relax
-    from tvm.contrib import cc
 
     if skip_dlight_gemv and target.kind.name in {"cuda", "rocm", "metal", "vulkan", "opencl", "webgpu"}:
         from tvm import dlight as dl
@@ -476,6 +475,7 @@ def compile_tvm_module(
 
     import tvm
     import tvm.relax as relax
+    from tvm.contrib import cc
 
     if use_kv_cache:
         mods = export_torch_model_with_cache(

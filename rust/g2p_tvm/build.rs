@@ -79,20 +79,13 @@ fn main() {
         let lib_name = stem.strip_prefix("lib").unwrap_or(&stem);
         println!("cargo:rerun-if-changed={}", static_path.display());
         println!("cargo:rustc-link-search=native={}", dir.display());
-        println!("cargo:rustc-link-lib=static={}", lib_name);
         match env::var("CARGO_CFG_TARGET_OS").as_deref() {
-            Ok("macos") => {
-                println!(
-                    "cargo:rustc-link-arg=-Wl,-force_load,{}",
-                    static_path.display()
-                );
+            Ok("windows") => {
+                println!("cargo:rustc-link-lib=static={}", lib_name);
             }
-            Ok("linux") | Ok("android") => {
-                println!("cargo:rustc-link-arg=-Wl,--whole-archive");
-                println!("cargo:rustc-link-arg={}", static_path.display());
-                println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
+            _ => {
+                println!("cargo:rustc-link-lib=static:+whole-archive={}", lib_name);
             }
-            _ => {}
         }
     }
 }
