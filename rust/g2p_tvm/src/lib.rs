@@ -215,7 +215,7 @@ impl TvmExecutable {
 
     fn call_tensor(&self, function: &Function, args: &[AnyView<'_>]) -> Result<Tensor, TvmError> {
         let output = function.call_packed(args)?;
-        output.try_as::<Tensor>().ok_or(TvmError::UnexpectedOutputType(output.type_index()))
+        extract_tensor_from_output(&output, 0)
     }
 }
 
@@ -256,6 +256,20 @@ fn initialize_vm(vm_init: &Function, config: VmConfig) -> Result<(), TvmError> {
         vm_init.call_tuple((config.device_type, config.device_id, POOLED_ALLOCATOR))?;
     }
     Ok(())
+}
+
+fn extract_tensor_from_output(output: &tvm_ffi::Any, index: usize) -> Result<Tensor, TvmError> {
+    if let Some(tensor) = output.try_as::<Tensor>() {
+        return Ok(tensor);
+    }
+    if output.type_index() == tvm_ffi::TypeIndex::kTVMFFIArray as i32 {
+        let array_get_item = Function::get_global("ffi.ArrayGetItem")?;
+        let index_val = index as i64;
+        let args = [AnyView::from(output), AnyView::from(&index_val)];
+        let element = array_get_item.call_packed(&args)?;
+        return element.try_as::<Tensor>().ok_or(TvmError::UnexpectedOutputType(element.type_index()));
+    }
+    Err(TvmError::UnexpectedOutputType(output.type_index()))
 }
 
 pub fn tensor_from_i64(data: &[i64], shape: &[i64]) -> Result<Tensor, TvmError> {
