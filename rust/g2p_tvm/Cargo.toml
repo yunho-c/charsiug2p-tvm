@@ -1,0 +1,13 @@
+[package]
+name = "charsiug2p-g2p-tvm"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[lib]
+name = "charsiug2p_g2p_tvm"
+crate-type = ["lib"]
+
+[dependencies]
+charsiug2p-g2p-core = { path = "../g2p_core" }
+tvm-ffi = { path = "../../external/tvm/3rdparty/tvm-ffi/rust/tvm-ffi" }

@@ -25,6 +25,7 @@ from charsiug2p_tvm.tvm_runtime import (
 )
 from charsiug2p_tvm.eval import evaluate_against_reference, prepare_samples
 from charsiug2p_tvm.profile import parse_targets, profile_targets, write_profile_csv
+from charsiug2p_tvm.tokenizer_export import default_tokenizer_export_dir, export_tokenizer_assets
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
@@ -147,6 +148,55 @@ def list_checkpoints() -> None:
     table.add_column("Notes", style="white")
     for checkpoint, note in PRETRAINED_CHECKPOINTS:
         table.add_row(checkpoint, note)
+    console.print(table)
+
+
+@app.command("export-tokenizer")
+def export_tokenizer(
+    output_dir: Path | None = typer.Option(
+        None,
+        "--output-dir",
+        help="Output directory for tokenizer assets (defaults to dist/tokenizers/<model>/<details>).",
+    ),
+    tokenizer_name: str = typer.Option(
+        "google/byt5-small",
+        "--tokenizer",
+        help="Tokenizer name or path to export.",
+    ),
+    checkpoint: str = typer.Option(DEFAULT_CONFIG.checkpoint, help="Checkpoint to scope default output_dir."),
+    max_input_bytes: int = typer.Option(DEFAULT_CONFIG.max_input_bytes, help="Max bytes for prefixed word."),
+    max_output_len: int = typer.Option(DEFAULT_CONFIG.max_output_len, help="Max output length."),
+    use_fast: bool = typer.Option(True, "--fast/--no-fast", help="Use fast tokenizer implementation."),
+    ensure_tokenizer_json: bool = typer.Option(
+        True,
+        "--ensure-tokenizer-json/--no-ensure-tokenizer-json",
+        help="Attempt to emit tokenizer.json when available.",
+    ),
+    export_sentencepiece: bool = typer.Option(
+        True,
+        "--sentencepiece/--no-sentencepiece",
+        help="Also export SentencePiece model files if available.",
+    ),
+) -> None:
+    """Export tokenizer assets and metadata for Rust/Flutter use."""
+    output_dir = output_dir or default_tokenizer_export_dir(
+        checkpoint=checkpoint,
+        max_input_bytes=max_input_bytes,
+        max_output_len=max_output_len,
+    )
+    result = export_tokenizer_assets(
+        output_dir,
+        tokenizer_name=tokenizer_name,
+        use_fast=use_fast,
+        ensure_tokenizer_json=ensure_tokenizer_json,
+        export_sentencepiece=export_sentencepiece,
+    )
+    table = Table(title="Tokenizer Export", show_header=True, header_style="bold")
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="white")
+    table.add_row("output_dir", str(result.output_dir))
+    table.add_row("metadata", str(result.metadata_path))
+    table.add_row("tokenizer_json", str(result.tokenizer_json) if result.tokenizer_json else "(none)")
     console.print(table)
 
 
