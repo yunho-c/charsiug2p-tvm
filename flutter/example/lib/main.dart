@@ -29,6 +29,7 @@ class G2pHome extends StatefulWidget {
 
 class _G2pHomeState extends State<G2pHome> {
   final _assetRootController = TextEditingController();
+  final _assetPrefixController = TextEditingController(text: 'assets/charsiug2p');
   final _langController = TextEditingController(text: 'eng-us');
   final _wordsController = TextEditingController(text: 'Char siu');
 
@@ -54,6 +55,7 @@ class _G2pHomeState extends State<G2pHome> {
 
   CharsiuG2p? _model;
   String? _modelAssetRoot;
+  bool _useBundledAssets = true;
   String _target = 'metal-ios';
   String _device = 'metal';
   String _result = '';
@@ -63,6 +65,7 @@ class _G2pHomeState extends State<G2pHome> {
   @override
   void dispose() {
     _assetRootController.dispose();
+    _assetPrefixController.dispose();
     _langController.dispose();
     _wordsController.dispose();
     super.dispose();
@@ -76,9 +79,19 @@ class _G2pHomeState extends State<G2pHome> {
     });
 
     try {
-      final assetRoot = _assetRootController.text.trim();
-      if (assetRoot.isEmpty) {
-        throw ArgumentError('Asset root is required.');
+      String assetRoot;
+      if (_useBundledAssets) {
+        final prefix = _assetPrefixController.text.trim();
+        if (prefix.isEmpty) {
+          throw ArgumentError('Asset prefix is required.');
+        }
+        assetRoot = await CharsiuG2pAssets.prepareTokenizerRoot(assetPrefix: prefix);
+        _assetRootController.text = assetRoot;
+      } else {
+        assetRoot = _assetRootController.text.trim();
+        if (assetRoot.isEmpty) {
+          throw ArgumentError('Asset root is required.');
+        }
       }
       final lang = _langController.text.trim();
       if (lang.isEmpty) {
@@ -140,6 +153,28 @@ class _G2pHomeState extends State<G2pHome> {
             'Place assets under <assetRoot>/tokenizers/<checkpoint>/in{max_input_bytes}_out{max_output_len}/ '
             'and <assetRoot>/tvm/<checkpoint>/b{batch_size}_in{max_input_bytes}_out{max_output_len}/<target>/',
           ),
+          const SizedBox(height: 12),
+          SwitchListTile(
+            title: const Text('Use bundled assets'),
+            value: _useBundledAssets,
+            onChanged: _loading
+                ? null
+                : (value) {
+                    setState(() {
+                      _useBundledAssets = value;
+                    });
+                  },
+          ),
+          if (_useBundledAssets) ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _assetPrefixController,
+              decoration: const InputDecoration(
+                labelText: 'Asset prefix',
+                hintText: 'assets/charsiug2p',
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: _target,

@@ -11,3 +11,14 @@ dependencies:
     sdk: flutter
   ffi: ^2.1.0
   flutter_rust_bridge: ^2.11.1
+  path: ^1.9.0
+  path_provider: ^2.1.4
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.charsiug2p.flutter
+        pluginClass: CharsiuG2pFlutterPlugin
+      ios:
+        pluginClass: CharsiuG2pFlutterPlugin

@@ -21,7 +21,9 @@ import 'package:charsiug2p_flutter/charsiug2p_flutter.dart';
 
 Future<void> runG2p() async {
   // assetRoot should contain tokenizers/ and tvm/ subfolders.
-  final assetRoot = '/path/to/app/assets';
+  final assetRoot = await CharsiuG2pAssets.prepareTokenizerRoot(
+    assetPrefix: 'assets/charsiug2p',
+  );
 
   await CharsiuG2p.init();
   final g2p = await CharsiuG2p.load(assetRoot: assetRoot);
@@ -29,6 +31,11 @@ Future<void> runG2p() async {
   print(phones);
 }
 ```
+
+Platform paths:
+- Use `CharsiuG2pPlatformChannels.getPaths()` to get platform-specific bundle paths.
+- On iOS, `resourceDir` points to the app bundle resources.
+- On Android, `nativeLibraryDir` points to the APK native libs directory.
 
 ## Example app
 
@@ -39,3 +46,7 @@ cd flutter/example
 flutter pub get
 flutter run
 ```
+
+Asset placement:
+- Place tokenizer assets under `<assetRoot>/tokenizers/<checkpoint_sanitized>/in{max_input_bytes}_out{max_output_len}/`.
+- Place TVM artifacts under `<assetRoot>/tvm/<checkpoint_sanitized>/b{batch_size}_in{max_input_bytes}_out{max_output_len}/metal-ios/` (iOS) or the matching target name for other platforms.
