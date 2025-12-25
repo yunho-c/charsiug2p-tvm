@@ -1,6 +1,6 @@
 # CharsiuG2P Rust Workspace
 
-This directory contains the Rust implementation of the CharsiuG2P TVM pipeline plus a CLI for local testing. It loads tokenizer metadata exported from the Python tooling and runs TVM-compiled encoder/decoder modules with a cacheless greedy decode loop.
+This directory contains the Rust implementation of the CharsiuG2P TVM pipeline plus a CLI for local testing. It loads tokenizer metadata exported from the Python tooling and runs TVM-compiled encoder/decoder modules with either cacheless greedy decode or KV-cache artifacts (`decoder_prefill`/`decoder_step`).
 
 ## Crates
 
@@ -22,6 +22,8 @@ TVM artifacts:
 
 `dist/tvm/<checkpoint_sanitized>/b{batch_size}_in{max_input_bytes}_out{max_output_len}/{target}/encoder.{ext}`
 `dist/tvm/<checkpoint_sanitized>/b{batch_size}_in{max_input_bytes}_out{max_output_len}/{target}/decoder.{ext}`
+`dist/tvm/<checkpoint_sanitized>/b{batch_size}_in{max_input_bytes}_out{max_output_len}/{target}/decoder_prefill.{ext}`
+`dist/tvm/<checkpoint_sanitized>/b{batch_size}_in{max_input_bytes}_out{max_output_len}/{target}/decoder_step.{ext}`
 
 `checkpoint_sanitized` replaces `/` with `_`.
 
@@ -63,6 +65,8 @@ cargo run -p charsiug2p-g2p-cli -- \
   --lang eng-us \
   Char siu
 ```
+
+KV-cache is the default; ensure `decoder_prefill.{ext}` and `decoder_step.{ext}` are present in the same target directory (or pass `--decoder-prefill`/`--decoder-step` explicitly). Use `--kv-cache=false` to run the cacheless decoder.
 
 ## Development notes
 

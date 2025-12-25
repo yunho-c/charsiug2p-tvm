@@ -20,6 +20,10 @@ struct Args {
     encoder: Option<PathBuf>,
     #[arg(long, help = "Path to decoder artifact (.so/.dylib) (auto-derived when omitted)")]
     decoder: Option<PathBuf>,
+    #[arg(long, help = "Path to decoder_prefill artifact (.so/.dylib)")]
+    decoder_prefill: Option<PathBuf>,
+    #[arg(long, help = "Path to decoder_step artifact (.so/.dylib)")]
+    decoder_step: Option<PathBuf>,
     #[arg(
         long,
         default_value = "charsiu/g2p_multilingual_byT5_tiny_8_layers_100",
@@ -60,6 +64,15 @@ struct Args {
     max_output_len: usize,
     #[arg(long, default_value_t = 1, help = "Compiled batch size")]
     batch_size: usize,
+    #[arg(
+        long,
+        default_value_t = true,
+        default_missing_value = "true",
+        action = clap::ArgAction::Set,
+        value_parser = clap::builder::BoolishValueParser::new(),
+        help = "Enable KV-cache artifacts (use --kv-cache=false for cacheless decode)"
+    )]
+    kv_cache: bool,
     #[arg(long, default_value_t = false, help = "Insert a space after the language prefix")]
     space_after_colon: bool,
     #[arg(help = "Words to convert to phonemes")]
@@ -78,7 +91,7 @@ fn main() {
         max_output_len: args.max_output_len,
         space_after_colon: args.space_after_colon,
     };
-    let pipeline_config = PipelineConfig::from_core(&core_config, args.batch_size, None);
+    let pipeline_config = PipelineConfig::from_core(&core_config, args.batch_size, None, args.kv_cache);
     let artifact_spec = ArtifactSpec {
         checkpoint: args.checkpoint.clone(),
         max_input_bytes: args.max_input_bytes,
@@ -99,8 +112,22 @@ fn main() {
         },
     };
     let artifacts = match (args.encoder.clone(), args.decoder.clone()) {
-        (Some(encoder), Some(decoder)) => TvmArtifacts::new(encoder, decoder),
-        (None, None) => match resolver.resolve_tvm_artifacts(&artifact_spec, args.tvm_ext.as_deref()) {
+        (Some(encoder), Some(decoder)) => {
+            let mut artifacts = TvmArtifacts::new(encoder, decoder);
+            if args.kv_cache {
+                let (prefill, step) = resolve_cache_paths(&artifacts, &args).unwrap_or_else(|err| {
+                    eprintln!("{err}");
+                    process::exit(1);
+                });
+                artifacts = artifacts.with_cache(prefill, step);
+            }
+            artifacts
+        }
+        (None, None) => match resolver.resolve_tvm_artifacts(
+            &artifact_spec,
+            args.tvm_ext.as_deref(),
+            args.kv_cache,
+        ) {
             Ok(artifacts) => artifacts,
             Err(err) => {
                 eprintln!("Failed to locate TVM artifacts: {err}");
@@ -182,4 +209,38 @@ fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
         }
     }
     result
+}
+
+fn resolve_cache_paths(artifacts: &TvmArtifacts, args: &Args) -> Result<(PathBuf, PathBuf), String> {
+    match (args.decoder_prefill.clone(), args.decoder_step.clone()) {
+        (Some(prefill), Some(step)) => return Ok((prefill, step)),
+        (Some(_), None) | (None, Some(_)) => {
+            return Err("Both --decoder-prefill and --decoder-step must be provided together.".to_string())
+        }
+        (None, None) => {}
+    }
+
+    let dir = artifacts
+        .encoder
+        .parent()
+        .or_else(|| artifacts.decoder.parent())
+        .map(|path| path.to_path_buf())
+        .ok_or_else(|| "Unable to infer decoder_prefill/decoder_step directory.".to_string())?;
+    let ext = artifacts
+        .encoder
+        .extension()
+        .or_else(|| artifacts.decoder.extension())
+        .and_then(|ext| ext.to_str())
+        .ok_or_else(|| "Unable to infer decoder_prefill/decoder_step extension.".to_string())?;
+    let prefill = dir.join(format!("decoder_prefill.{ext}"));
+    let step = dir.join(format!("decoder_step.{ext}"));
+    if prefill.exists() && step.exists() {
+        Ok((prefill, step))
+    } else {
+        Err(format!(
+            "KV-cache enabled but decoder_prefill/decoder_step not found at {} or {}.",
+            prefill.display(),
+            step.display()
+        ))
+    }
 }
