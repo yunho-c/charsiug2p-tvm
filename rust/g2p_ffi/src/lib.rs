@@ -290,3 +290,44 @@ fn is_byt5_metadata(metadata: &TokenizerMetadata) -> bool {
         .to_ascii_lowercase()
         .contains("byt5")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use charsiug2p_g2p_tokenizer::TokenizerMetadata;
+    use serde_json::Value;
+
+    fn sample_metadata(name: &str, byt5_offset: Option<i64>) -> TokenizerMetadata {
+        TokenizerMetadata {
+            tokenizer_name: name.to_string(),
+            is_fast: false,
+            vocab_size: Some(256),
+            model_max_length: Some(512),
+            pad_token_id: Some(0),
+            eos_token_id: Some(1),
+            unk_token_id: Some(2),
+            special_tokens: Value::Null,
+            files: vec![],
+            sentencepiece_model: None,
+            byt5_offset,
+        }
+    }
+
+    #[test]
+    fn byt5_metadata_detects_offset() {
+        let metadata = sample_metadata("custom-tokenizer", Some(3));
+        assert!(is_byt5_metadata(&metadata));
+    }
+
+    #[test]
+    fn byt5_metadata_detects_name() {
+        let metadata = sample_metadata("google/byt5-small", None);
+        assert!(is_byt5_metadata(&metadata));
+    }
+
+    #[test]
+    fn byt5_metadata_rejects_other() {
+        let metadata = sample_metadata("bert-base", None);
+        assert!(!is_byt5_metadata(&metadata));
+    }
+}

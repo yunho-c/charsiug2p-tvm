@@ -40,6 +40,7 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
   - `use_kv_cache=true`, `device` inferred from `target` when unset
 - Tokenizer is ByT5-only: `g2p_ffi` validates tokenizer metadata (`byt5_offset` or tokenizer name containing `byt5`) and errors otherwise.
 - Errors are structured as `G2pFfiError { kind, message, details }` with `G2pErrorKind` (config, artifact, tokenizer, tvm, device, inference).
+- `g2p_ffi` builds `cdylib` + `staticlib` outputs for Flutter (in addition to the Rust `lib` artifact).
 
 ## Scaffolding (repo layout)
 
