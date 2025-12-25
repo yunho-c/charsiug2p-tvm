@@ -29,6 +29,7 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
   - `ArtifactRoots` supports separate tokenizer/tvm roots so mobile apps can pass per-platform asset storage directories instead of relying on repo-relative paths.
   - CLI honors `CHARSIUG2P_ASSET_ROOT`, `CHARSIUG2P_TOKENIZER_ROOT`, and `CHARSIUG2P_TVM_ROOT` to keep mobile path injection simple.
   - Repo root has a `dist` symlink to `python/dist` so Rust tooling matches the Python default layout.
+  - iOS bundles use `target=metal-ios`, so artifacts should live under `dist/tvm/<checkpoint>/b*_in*_out*/metal-ios/`.
 
 ## FRB API (initial implementation)
 
@@ -41,6 +42,10 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
 - Tokenizer is ByT5-only: `g2p_ffi` validates tokenizer metadata (`byt5_offset` or tokenizer name containing `byt5`) and errors otherwise.
 - Errors are structured as `G2pFfiError { kind, message, details }` with `G2pErrorKind` (config, artifact, tokenizer, tvm, device, inference).
 - `g2p_ffi` builds `cdylib` + `staticlib` outputs for Flutter (in addition to the Rust `lib` artifact).
+- FRB API definitions live in `rust/g2p_ffi/src/api.rs`; `rust/g2p_ffi/src/lib.rs` only wires `pub mod api;` and `mod frb_generated;`.
+- Codegen config: `flutter/flutter_rust_bridge.yaml`, outputs `flutter/lib/{api.dart,frb_generated*.dart}` and `rust/g2p_ffi/src/frb_generated.rs`.
+- Codegen command: `flutter_rust_bridge_codegen generate --config-file flutter/flutter_rust_bridge.yaml`.
+- Codegen requires Flutter/Dart tooling plus `tvm-ffi-config` on `PATH` (e.g., `python/.pixi/envs/default/bin`) since it runs `cargo expand` on the Rust crate.
 
 ## Scaffolding (repo layout)
 
@@ -50,14 +55,14 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
   - `g2p_pipeline/`: TVM + tokenizer pipeline (cacheless + KV-cache)
   - `g2p_ffi/`: FRB API layer exposing Rust functions to Flutter (planned)
   - `g2p_cli/`: lightweight CLI for local testing
-- `mobile/` (Flutter app or plugin)
+- `flutter/` (Flutter app or plugin)
   - `assets/`: tokenizer files + compiled TVM artifacts + manifest
   - FRB-generated bindings + build scripts
 
 ## Implementation phases
 
 1) Bootstrap + assets
-   - [x] Export tokenizer artifacts from Python and place under `mobile/assets/`.
+   - [x] Export tokenizer artifacts from Python and place under `flutter/assets/`.
    - Compile TVM artifacts for:
      - [x] dev: `llvm` (desktop validation)
      - [x] ios: `metal` (arm64)

@@ -12,7 +12,7 @@ charsiug2p-g2p-core = { path = "../g2p_core" }
 charsiug2p-g2p-pipeline = { path = "../g2p_pipeline" }
 charsiug2p-g2p-tokenizer = { path = "../g2p_tokenizer" }
 charsiug2p-g2p-tvm = { path = "../g2p_tvm" }
-flutter_rust_bridge = "2.0"
+flutter_rust_bridge = "=2.11.1"
 serde = { version = "1", features = ["derive"] }
 
 [lints.rust]

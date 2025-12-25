@@ -1,0 +1,13 @@
+name: charsiug2p_flutter
+description: Flutter Rust Bridge bindings for charsiug2p TVM runtime.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ffi: ^2.1.0
+  flutter_rust_bridge: ^2.11.1

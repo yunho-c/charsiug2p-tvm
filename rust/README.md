@@ -27,6 +27,7 @@ TVM artifacts:
 `dist/tvm/<checkpoint_sanitized>/b{batch_size}_in{max_input_bytes}_out{max_output_len}/{target}/decoder_step.{ext}`
 
 `checkpoint_sanitized` replaces `/` with `_`.
+For iOS, we use `target=metal-ios` so bundle the artifacts under a `metal-ios/` directory to keep target/device mismatches obvious.
 
 ## Running the CLI
 
