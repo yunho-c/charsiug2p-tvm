@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::PathBuf;
 use std::process;
@@ -64,6 +64,12 @@ struct Args {
     max_output_len: usize,
     #[arg(long, default_value_t = 1, help = "Compiled batch size")]
     batch_size: usize,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        help = "Batch sizes to select from (comma-separated or repeatable)"
+    )]
+    batch_sizes: Vec<usize>,
     #[arg(
         long,
         default_value_t = true,
@@ -132,6 +138,44 @@ fn main() {
             }
         },
     };
+    if !args.batch_sizes.is_empty()
+        && (args.encoder.is_some()
+            || args.decoder.is_some()
+            || args.decoder_prefill.is_some()
+            || args.decoder_step.is_some())
+    {
+        eprintln!("--batch-sizes cannot be used with explicit artifact paths.");
+        process::exit(1);
+    }
+
+    if !args.batch_sizes.is_empty() {
+        let batch_sizes = normalize_batch_sizes(&args.batch_sizes).unwrap_or_else(|err| {
+            eprintln!("{err}");
+            process::exit(1);
+        });
+        let outputs = run_with_batch_sizes(
+            &args.words,
+            &args.lang,
+            args.space_after_colon,
+            &tokenizer_metadata,
+            &artifact_spec,
+            &resolver,
+            &core_config,
+            args.kv_cache,
+            device,
+            args.tvm_ext.as_deref(),
+            &batch_sizes,
+        )
+        .unwrap_or_else(|err| {
+            eprintln!("{err}");
+            process::exit(1);
+        });
+        for (word, phoneme) in args.words.iter().zip(outputs.iter()) {
+            println!("{word}\t{phoneme}");
+        }
+        return;
+    }
+
     let artifacts = match (args.encoder.clone(), args.decoder.clone()) {
         (Some(encoder), Some(decoder)) => {
             let mut artifacts = TvmArtifacts::new(encoder, decoder);
@@ -264,6 +308,81 @@ fn resolve_cache_paths(artifacts: &TvmArtifacts, args: &Args) -> Result<(PathBuf
             step.display()
         ))
     }
+}
+
+fn normalize_batch_sizes(values: &[usize]) -> Result<Vec<usize>, String> {
+    let mut sizes = values.to_vec();
+    if sizes.is_empty() {
+        return Ok(sizes);
+    }
+    if sizes.iter().any(|size| *size == 0) {
+        return Err("Batch sizes must be positive.".to_string());
+    }
+    sizes.sort_unstable();
+    sizes.dedup();
+    Ok(sizes)
+}
+
+fn pick_batch_size(available: &[usize], needed: usize) -> Result<usize, String> {
+    if available.is_empty() {
+        return Err("No batch sizes provided.".to_string());
+    }
+    if available[0] == 0 {
+        return Err("Batch sizes must be positive.".to_string());
+    }
+    if needed <= available[0] {
+        return Ok(available[0]);
+    }
+    for size in available {
+        if *size >= needed {
+            return Ok(*size);
+        }
+    }
+    Ok(*available.last().unwrap())
+}
+
+fn run_with_batch_sizes(
+    words: &[String],
+    lang: &str,
+    space_after_colon: bool,
+    tokenizer_metadata: &PathBuf,
+    artifact_spec: &ArtifactSpec,
+    resolver: &ArtifactResolver,
+    core_config: &G2pConfig,
+    kv_cache: bool,
+    device: DeviceConfig,
+    tvm_ext: Option<&str>,
+    batch_sizes: &[usize],
+) -> Result<Vec<String>, String> {
+    let mut pipelines = HashMap::<usize, G2pPipeline>::new();
+    let mut results = Vec::with_capacity(words.len());
+    let mut index = 0usize;
+    while index < words.len() {
+        let remaining = words.len() - index;
+        let batch_size = pick_batch_size(batch_sizes, remaining)?;
+        if !pipelines.contains_key(&batch_size) {
+            let spec = ArtifactSpec {
+                batch_size,
+                ..artifact_spec.clone()
+            };
+            let artifacts = resolver
+                .resolve_tvm_artifacts(&spec, tvm_ext, kv_cache)
+                .map_err(|err| format!("Failed to locate TVM artifacts for batch_size={batch_size}: {err}"))?;
+            let config = PipelineConfig::from_core(core_config, batch_size, None, kv_cache, device);
+            let pipeline = G2pPipeline::load(tokenizer_metadata, artifacts, config)
+                .map_err(|err| format!("Failed to initialize pipeline for batch_size={batch_size}: {err}"))?;
+            pipelines.insert(batch_size, pipeline);
+        }
+        let chunk_len = remaining.min(batch_size);
+        let chunk = words[index..index + chunk_len].to_vec();
+        let pipeline = pipelines.get(&batch_size).expect("pipeline missing");
+        let outputs = pipeline
+            .run(&chunk, lang, space_after_colon)
+            .map_err(|err| format!("Inference failed for batch_size={batch_size}: {err}"))?;
+        results.extend(outputs);
+        index += chunk_len;
+    }
+    Ok(results)
 }
 
 fn default_device_for_target(target: &str) -> &'static str {

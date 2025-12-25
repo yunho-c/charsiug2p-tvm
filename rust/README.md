@@ -69,6 +69,8 @@ cargo run -p charsiug2p-g2p-cli -- \
 KV-cache is the default; ensure `decoder_prefill.{ext}` and `decoder_step.{ext}` are present in the same target directory (or pass `--decoder-prefill`/`--decoder-step` explicitly). Use `--kv-cache=false` to run the cacheless decoder.
 The CLI defaults `--device` based on `--tvm-target` (for example, `metal` → `metal`, `llvm` → `cpu`). Override with `--device` and `--device-id` when needed.
 
+To auto-select from multiple compiled batch sizes, use `--batch-sizes` (comma-separated). The CLI will pick the smallest batch size that fits the remaining words.
+
 ## Development notes
 
 - Build requires `tvm-ffi-config` on `PATH` (installable via `pip install` in the pixi environment).
