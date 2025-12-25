@@ -51,6 +51,36 @@ done
 
 sh "$BASEDIR/run_build_tool.sh" build-pod "$@"
 
+# macOS: stage TVM FFI dylibs so the Flutter app can link/load them via rpath.
+if [ "$CARGOKIT_DARWIN_PLATFORM_NAME" = "macosx" ]; then
+  # Resolve the TVM FFI build output from tvm-ffi-config.
+  if ! command -v tvm-ffi-config >/dev/null 2>&1; then
+    echo "error: tvm-ffi-config not found in PATH" >&2
+    exit 1
+  fi
+  TVM_FFI_LIBDIR="$(tvm-ffi-config --libdir)"
+  TVM_FFI_DYLIB="${TVM_FFI_LIBDIR}/libtvm_ffi.dylib"
+  TVM_FFI_TESTING_DYLIB="${TVM_FFI_LIBDIR}/libtvm_ffi_testing.dylib"
+  # Copy dylibs into the build products (and fail early if missing).
+  for lib in "$TVM_FFI_DYLIB" "$TVM_FFI_TESTING_DYLIB"; do
+    if [ ! -f "$lib" ]; then
+      echo "error: missing dylib at ${lib}" >&2
+      exit 1
+    fi
+    cp "$lib" "${BUILT_PRODUCTS_DIR}/"
+  done
+  # Also embed them under Frameworks and make the install name rpath-relative.
+  if [ -n "$FRAMEWORKS_FOLDER_PATH" ]; then
+    FRAMEWORKS_DIR="${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}"
+    mkdir -p "$FRAMEWORKS_DIR"
+    for lib in "$TVM_FFI_DYLIB" "$TVM_FFI_TESTING_DYLIB"; do
+      dest="${FRAMEWORKS_DIR}/$(basename "$lib")"
+      cp "$lib" "$dest"
+      install_name_tool -id "@rpath/$(basename "$lib")" "$dest"
+    done
+  fi
+fi
+
 # Make a symlink from built framework to phony file, which will be used as input to
 # build script. This should force rebuild (podspec currently doesn't support alwaysOutOfDate
 # attribute on custom build phase)
