@@ -42,6 +42,7 @@ cargo run -p charsiug2p-g2p-cli -- \
   --max-input-bytes 64 \
   --max-output-len 128 \
   --lang eng-us \
+  --device cpu \
   Char siu
 ```
 
@@ -67,6 +68,7 @@ cargo run -p charsiug2p-g2p-cli -- \
 ```
 
 KV-cache is the default; ensure `decoder_prefill.{ext}` and `decoder_step.{ext}` are present in the same target directory (or pass `--decoder-prefill`/`--decoder-step` explicitly). Use `--kv-cache=false` to run the cacheless decoder.
+Use `--device cuda` (or `metal`, `vulkan`, `opencl`, `webgpu`, `rocm`) to target non-CPU devices. Pair with `--device-id` if needed.
 
 ## Development notes
 

@@ -2,7 +2,9 @@ use std::path::Path;
 
 use charsiug2p_g2p_core::{prepare_prefixed_words, G2pConfig, G2pError};
 use charsiug2p_g2p_tokenizer::{load_tokenizer_handle, TokenizerBackend, TokenizerError, TokenizerHandle};
-use charsiug2p_g2p_tvm::{tensor_from_i64, TvmArtifacts, TvmError, TvmExecutable};
+use charsiug2p_g2p_tvm::{
+    tensor_from_i64_device, tensor_to_vec_f32, DeviceConfig, TvmArtifacts, TvmError, TvmExecutable,
+};
 
 mod artifacts;
 pub use artifacts::{ArtifactError, ArtifactResolver, ArtifactRoots, ArtifactSpec};
@@ -60,6 +62,7 @@ pub struct PipelineConfig {
     pub eos_token_id: Option<i64>,
     pub pad_token_id: Option<i64>,
     pub use_kv_cache: bool,
+    pub device: DeviceConfig,
 }
 
 impl PipelineConfig {
@@ -68,6 +71,7 @@ impl PipelineConfig {
         batch_size: usize,
         eos_token_id: Option<i64>,
         use_kv_cache: bool,
+        device: DeviceConfig,
     ) -> Self {
         Self {
             max_input_bytes: config.max_input_bytes,
@@ -76,6 +80,7 @@ impl PipelineConfig {
             eos_token_id,
             pad_token_id: None,
             use_kv_cache,
+            device,
         }
     }
 }
@@ -95,7 +100,7 @@ impl G2pPipeline {
         let handle = load_tokenizer_handle(tokenizer_metadata, config.max_input_bytes)?;
         let TokenizerHandle { backend, metadata } = handle;
         let tokenizer = backend;
-        let tvm = TvmExecutable::load(&artifacts)?;
+        let tvm = TvmExecutable::load_with_device(&artifacts, config.device)?;
         let config = PipelineConfig {
             eos_token_id: config.eos_token_id.or(metadata.eos_token_id),
             pad_token_id: config.pad_token_id.or(metadata.pad_token_id),
@@ -127,8 +132,16 @@ impl G2pPipeline {
             let input_ids = pad_batch_i64(&encoded.input_ids, batch_size, encoded.max_length, pad_token_id)?;
             let attention_mask = pad_batch_i64(&encoded.attention_mask, batch_size, encoded.max_length, 0)?;
 
-            let encoder_input = tensor_from_i64(&input_ids, &[batch_size as i64, encoded.max_length as i64])?;
-            let encoder_mask = tensor_from_i64(&attention_mask, &[batch_size as i64, encoded.max_length as i64])?;
+            let encoder_input = tensor_from_i64_device(
+                &input_ids,
+                &[batch_size as i64, encoded.max_length as i64],
+                &self.config.device,
+            )?;
+            let encoder_mask = tensor_from_i64_device(
+                &attention_mask,
+                &[batch_size as i64, encoded.max_length as i64],
+                &self.config.device,
+            )?;
             let encoder_states = self.tvm.call_encoder(&encoder_input, &encoder_mask)?;
 
             let generated = if self.config.use_kv_cache {
@@ -179,9 +192,10 @@ impl G2pPipeline {
             }
         }
         for step in 1..self.config.max_output_len {
-            let decoder_input = tensor_from_i64(
+            let decoder_input = tensor_from_i64_device(
                 &generated,
                 &[batch_size as i64, self.config.max_output_len as i64],
+                &self.config.device,
             )?;
             let logits = self.tvm.call_decoder(&decoder_input, &encoder_states, &encoder_mask)?;
             let next_tokens = argmax_last_token(
@@ -223,7 +237,8 @@ impl G2pPipeline {
         }
 
         let prefill_ids = vec![pad_token_id; batch_size];
-        let prefill_tensor = tensor_from_i64(&prefill_ids, &[batch_size as i64, 1])?;
+        let prefill_tensor =
+            tensor_from_i64_device(&prefill_ids, &[batch_size as i64, 1], &self.config.device)?;
         let (logits, mut past_k, mut past_v, mut cur_pos) =
             self.tvm
                 .call_decoder_prefill(&prefill_tensor, &encoder_states, &encoder_mask)?;
@@ -245,7 +260,8 @@ impl G2pPipeline {
             for row in 0..batch_size {
                 step_ids.push(generated[row * self.config.max_output_len + step - 1]);
             }
-            let step_tensor = tensor_from_i64(&step_ids, &[batch_size as i64, 1])?;
+            let step_tensor =
+                tensor_from_i64_device(&step_ids, &[batch_size as i64, 1], &self.config.device)?;
             let (logits, next_k, next_v, next_pos) = self.tvm.call_decoder_step(
                 &step_tensor,
                 &encoder_states,
@@ -299,10 +315,7 @@ fn argmax_last_token(
     seq_len: usize,
     step: usize,
 ) -> Result<Vec<i64>, PipelineError> {
-    let data = logits
-        .data_as_slice::<f32>()
-        .map_err(TvmError::from)
-        .map_err(PipelineError::Tvm)?;
+    let data = tensor_to_vec_f32(logits).map_err(PipelineError::Tvm)?;
     let vocab_size = data.len() / (batch_size * seq_len);
     let mut result = Vec::with_capacity(batch_size);
     for row in 0..batch_size {

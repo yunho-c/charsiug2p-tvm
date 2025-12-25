@@ -1,12 +1,16 @@
+use std::ffi::c_void;
 use std::fmt;
+use std::mem;
 use std::path::{Path, PathBuf};
 
-use tvm_ffi::{AnyView, Function, Module, Tensor};
+use tvm_ffi::{
+    AnyView, DLDataType, DLDataTypeCode, DLDataTypeExt, DLDevice, DLDeviceType, Function, Module,
+    Shape, Tensor,
+};
 
 pub const MAIN_FUNCTION: &str = "main";
 const VM_LOAD_FUNCTION: &str = "vm_load_executable";
 const VM_INIT_FUNCTION: &str = "vm_initialization";
-const DL_DEVICE_TYPE_CPU: i32 = 1;
 const DEFAULT_DEVICE_ID: i32 = 0;
 const POOLED_ALLOCATOR: i32 = 2;
 
@@ -21,6 +25,10 @@ pub enum TvmError {
         decoder_prefill: Option<PathBuf>,
         decoder_step: Option<PathBuf>,
     },
+    InvalidDevice(String),
+    TensorShapeMismatch { expected: usize, got: usize },
+    InvalidShapeDimension(i64),
+    TensorDtypeMismatch { expected: DLDataType, got: DLDataType },
     UnexpectedOutputType(i32),
     Ffi(tvm_ffi::Error),
 }
@@ -57,6 +65,23 @@ impl fmt::Display for TvmError {
                 "KV-cache artifacts are incomplete. decoder_prefill={:?}, decoder_step={:?}",
                 decoder_prefill, decoder_step
             ),
+            TvmError::InvalidDevice(device) => {
+                write!(f, "Unsupported device '{device}' for TVM runtime.")
+            }
+            TvmError::TensorShapeMismatch { expected, got } => {
+                write!(f, "Tensor shape mismatch: expected {expected}, got {got}")
+            }
+            TvmError::InvalidShapeDimension(value) => {
+                write!(f, "Invalid shape dimension: {value}")
+            }
+            TvmError::TensorDtypeMismatch { expected, got } => {
+                write!(
+                    f,
+                    "Tensor dtype mismatch: expected {}, got {}",
+                    expected.to_string(),
+                    got.to_string()
+                )
+            }
             TvmError::UnexpectedOutputType(type_index) => {
                 write!(f, "Unexpected output type index: {type_index}")
             }
@@ -79,6 +104,51 @@ pub struct TvmArtifacts {
     pub decoder: PathBuf,
     pub decoder_prefill: Option<PathBuf>,
     pub decoder_step: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DeviceConfig {
+    device: DLDevice,
+}
+
+impl DeviceConfig {
+    pub fn cpu() -> Self {
+        Self {
+            device: DLDevice::new(DLDeviceType::kDLCPU, DEFAULT_DEVICE_ID),
+        }
+    }
+
+    pub fn from_str(device: &str, device_id: i32) -> Result<Self, TvmError> {
+        let device_type = match device {
+            "cpu" | "llvm" => DLDeviceType::kDLCPU,
+            "cuda" | "gpu" => DLDeviceType::kDLCUDA,
+            "metal" => DLDeviceType::kDLMetal,
+            "vulkan" => DLDeviceType::kDLVulkan,
+            "opencl" => DLDeviceType::kDLOpenCL,
+            "webgpu" => DLDeviceType::kDLWebGPU,
+            "rocm" => DLDeviceType::kDLROCM,
+            _ => return Err(TvmError::InvalidDevice(device.to_string())),
+        };
+        Ok(Self {
+            device: DLDevice::new(device_type, device_id),
+        })
+    }
+
+    pub fn device(&self) -> DLDevice {
+        self.device
+    }
+
+    pub fn device_type(&self) -> DLDeviceType {
+        self.device.device_type
+    }
+
+    pub fn device_id(&self) -> i32 {
+        self.device.device_id
+    }
+
+    pub fn is_cpu(&self) -> bool {
+        self.device.device_type == DLDeviceType::kDLCPU
+    }
 }
 
 impl TvmArtifacts {
@@ -190,8 +260,15 @@ pub struct TvmExecutable {
 
 impl TvmExecutable {
     pub fn load(artifacts: &TvmArtifacts) -> Result<Self, TvmError> {
+        Self::load_with_device(artifacts, DeviceConfig::cpu())
+    }
+
+    pub fn load_with_device(
+        artifacts: &TvmArtifacts,
+        device: DeviceConfig,
+    ) -> Result<Self, TvmError> {
         artifacts.validate()?;
-        let vm_config = VmConfig::cpu();
+        let vm_config = VmConfig::new(device);
         let encoder = TvmModule::load(&artifacts.encoder)?.load_entry(MAIN_FUNCTION, vm_config)?;
         let decoder = TvmModule::load(&artifacts.decoder)?.load_entry(MAIN_FUNCTION, vm_config)?;
         let (decoder_prefill, decoder_step) = match (&artifacts.decoder_prefill, &artifacts.decoder_step) {
@@ -310,16 +387,12 @@ impl TvmExecutable {
 
 #[derive(Clone, Copy)]
 struct VmConfig {
-    device_type: i32,
-    device_id: i32,
+    device: DeviceConfig,
 }
 
 impl VmConfig {
-    fn cpu() -> Self {
-        Self {
-            device_type: DL_DEVICE_TYPE_CPU,
-            device_id: DEFAULT_DEVICE_ID,
-        }
+    fn new(device: DeviceConfig) -> Self {
+        Self { device }
     }
 }
 
@@ -332,17 +405,19 @@ struct LoadedModule {
 }
 
 fn initialize_vm(vm_init: &Function, config: VmConfig) -> Result<(), TvmError> {
-    if config.device_type != DL_DEVICE_TYPE_CPU {
+    let device_type = config.device.device_type() as i32;
+    let device_id = config.device.device_id();
+    if config.device.device_type() != DLDeviceType::kDLCPU {
         vm_init.call_tuple((
-            config.device_type,
-            config.device_id,
+            device_type,
+            device_id,
             POOLED_ALLOCATOR,
-            DL_DEVICE_TYPE_CPU,
+            DLDeviceType::kDLCPU as i32,
             DEFAULT_DEVICE_ID,
             POOLED_ALLOCATOR,
         ))?;
     } else {
-        vm_init.call_tuple((config.device_type, config.device_id, POOLED_ALLOCATOR))?;
+        vm_init.call_tuple((device_type, device_id, POOLED_ALLOCATOR))?;
     }
     Ok(())
 }
@@ -383,13 +458,120 @@ fn extract_tensor_array(output: &tvm_ffi::Any, expected: usize) -> Result<Vec<Te
 }
 
 pub fn tensor_from_i64(data: &[i64], shape: &[i64]) -> Result<Tensor, TvmError> {
-    Ok(Tensor::from_slice(data, shape)?)
+    tensor_from_i64_device(data, shape, &DeviceConfig::cpu())
 }
 
 pub fn tensor_from_i32(data: &[i32], shape: &[i64]) -> Result<Tensor, TvmError> {
-    Ok(Tensor::from_slice(data, shape)?)
+    tensor_from_i32_device(data, shape, &DeviceConfig::cpu())
+}
+
+pub fn tensor_from_i64_device(
+    data: &[i64],
+    shape: &[i64],
+    device: &DeviceConfig,
+) -> Result<Tensor, TvmError> {
+    tensor_from_slice_device(data, shape, device)
+}
+
+pub fn tensor_from_i32_device(
+    data: &[i32],
+    shape: &[i64],
+    device: &DeviceConfig,
+) -> Result<Tensor, TvmError> {
+    tensor_from_slice_device(data, shape, device)
+}
+
+pub fn tensor_to_vec_f32(tensor: &Tensor) -> Result<Vec<f32>, TvmError> {
+    let expected = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
+    if tensor.dtype() != expected {
+        return Err(TvmError::TensorDtypeMismatch {
+            expected,
+            got: tensor.dtype(),
+        });
+    }
+    if tensor.device().device_type == DLDeviceType::kDLCPU {
+        return Ok(tensor.data_as_slice::<f32>()?.to_vec());
+    }
+    let numel = tensor.numel();
+    let mut data = vec![0f32; numel];
+    let nbytes = numel * mem::size_of::<f32>();
+    tensor_copy_to_bytes(tensor, data.as_mut_ptr() as *mut c_void, nbytes)?;
+    Ok(data)
 }
 
 pub fn any_from_tensor(tensor: &Tensor) -> AnyView<'_> {
     AnyView::from(tensor)
+}
+
+fn tensor_from_slice_device<T: tvm_ffi::dtype::AsDLDataType>(
+    data: &[T],
+    shape: &[i64],
+    device: &DeviceConfig,
+) -> Result<Tensor, TvmError> {
+    let expected_len = shape_product(shape)?;
+    if data.len() != expected_len {
+        return Err(TvmError::TensorShapeMismatch {
+            expected: expected_len,
+            got: data.len(),
+        });
+    }
+    if device.is_cpu() {
+        return Ok(Tensor::from_slice(data, shape)?);
+    }
+    let dtype = T::DL_DATA_TYPE;
+    let tensor = tensor_alloc(shape, dtype, device.device())?;
+    let nbytes = data.len() * mem::size_of::<T>();
+    tensor_copy_from_bytes(&tensor, data.as_ptr() as *mut c_void, nbytes)?;
+    Ok(tensor)
+}
+
+fn tensor_alloc(shape: &[i64], dtype: DLDataType, device: DLDevice) -> Result<Tensor, TvmError> {
+    let alloc = Function::get_global("runtime.TVMTensorAllocWithScope")?;
+    let shape_obj = Shape::from(shape);
+    let mem_scope: Option<tvm_ffi::String> = None;
+    let alloc_args = [
+        AnyView::from(&shape_obj),
+        AnyView::from(&dtype),
+        AnyView::from(&device),
+        AnyView::from(&mem_scope),
+    ];
+    let tensor_any = alloc.call_packed(&alloc_args)?;
+    tensor_any
+        .try_as::<Tensor>()
+        .ok_or(TvmError::UnexpectedOutputType(tensor_any.type_index()))
+}
+
+fn tensor_copy_from_bytes(
+    tensor: &Tensor,
+    data_ptr: *mut c_void,
+    nbytes: usize,
+) -> Result<(), TvmError> {
+    let copy_from = Function::get_global("runtime.TVMTensorCopyFromBytes")?;
+    let copy_args = [
+        AnyView::from(tensor),
+        AnyView::from(&data_ptr),
+        AnyView::from(&nbytes),
+    ];
+    copy_from.call_packed(&copy_args)?;
+    Ok(())
+}
+
+fn tensor_copy_to_bytes(tensor: &Tensor, data_ptr: *mut c_void, nbytes: usize) -> Result<(), TvmError> {
+    let copy_to = Function::get_global("runtime.TVMTensorCopyToBytes")?;
+    let copy_args = [
+        AnyView::from(tensor),
+        AnyView::from(&data_ptr),
+        AnyView::from(&nbytes),
+    ];
+    copy_to.call_packed(&copy_args)?;
+    Ok(())
+}
+
+fn shape_product(shape: &[i64]) -> Result<usize, TvmError> {
+    let mut product = 1usize;
+    for dim in shape {
+        let dim_usize = usize::try_from(*dim).map_err(|_| TvmError::InvalidShapeDimension(*dim))?;
+        product = product.saturating_mul(dim_usize);
+    }
+    Ok(product)
 }

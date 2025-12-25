@@ -9,7 +9,7 @@ use charsiug2p_g2p_core::G2pConfig;
 use charsiug2p_g2p_pipeline::{
     ArtifactResolver, ArtifactRoots, ArtifactSpec, G2pPipeline, PipelineConfig,
 };
-use charsiug2p_g2p_tvm::TvmArtifacts;
+use charsiug2p_g2p_tvm::{DeviceConfig, TvmArtifacts};
 
 #[derive(Parser, Debug)]
 #[command(name = "charsiug2p-g2p", about = "Run CharsiuG2P inference with TVM artifacts")]
@@ -73,6 +73,10 @@ struct Args {
         help = "Enable KV-cache artifacts (use --kv-cache=false for cacheless decode)"
     )]
     kv_cache: bool,
+    #[arg(long, default_value = "cpu", help = "Device (cpu, cuda, metal, vulkan, opencl, webgpu, rocm)")]
+    device: String,
+    #[arg(long, default_value_t = 0, help = "Device id")]
+    device_id: i32,
     #[arg(long, default_value_t = false, help = "Insert a space after the language prefix")]
     space_after_colon: bool,
     #[arg(help = "Words to convert to phonemes")]
@@ -91,7 +95,20 @@ fn main() {
         max_output_len: args.max_output_len,
         space_after_colon: args.space_after_colon,
     };
-    let pipeline_config = PipelineConfig::from_core(&core_config, args.batch_size, None, args.kv_cache);
+    let device = match DeviceConfig::from_str(&args.device, args.device_id) {
+        Ok(device) => device,
+        Err(err) => {
+            eprintln!("Invalid device: {err}");
+            process::exit(1);
+        }
+    };
+    let pipeline_config = PipelineConfig::from_core(
+        &core_config,
+        args.batch_size,
+        None,
+        args.kv_cache,
+        device,
+    );
     let artifact_spec = ArtifactSpec {
         checkpoint: args.checkpoint.clone(),
         max_input_bytes: args.max_input_bytes,
