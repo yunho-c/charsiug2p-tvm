@@ -46,6 +46,7 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
 - Codegen config: `flutter/flutter_rust_bridge.yaml`, outputs `flutter/lib/src/{api.dart,frb_generated*.dart}` and `rust/g2p_ffi/src/frb_generated.rs`.
 - Codegen command: `flutter_rust_bridge_codegen generate --config-file flutter/flutter_rust_bridge.yaml`.
 - Codegen requires Flutter/Dart tooling plus `tvm-ffi-config` on `PATH` (e.g., `python/.pixi/envs/default/bin`) since it runs `cargo expand` on the Rust crate.
+- Flutter plugin includes a platform channel (`charsiug2p_flutter/paths`) that returns `resourceDir` and `nativeLibraryDir`; desktop returns bundle-relative paths and web returns `null` for both.
 
 ## Scaffolding (repo layout)
 

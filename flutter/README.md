@@ -36,6 +36,10 @@ Platform paths:
 - Use `CharsiuG2pPlatformChannels.getPaths()` to get platform-specific bundle paths.
 - On iOS, `resourceDir` points to the app bundle resources.
 - On Android, `nativeLibraryDir` points to the APK native libs directory.
+- On macOS, `resourceDir` points to app bundle resources and `nativeLibraryDir` points to the app Frameworks directory.
+- On Windows, `resourceDir` points to `data/flutter_assets` and `nativeLibraryDir` points to the executable directory.
+- On Linux, `resourceDir` points to `data/flutter_assets` and `nativeLibraryDir` points to the bundle `lib` directory.
+- On Web, both fields are `null`.
 
 ## Example app
 
