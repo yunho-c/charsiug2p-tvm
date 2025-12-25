@@ -30,6 +30,17 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
   - CLI honors `CHARSIUG2P_ASSET_ROOT`, `CHARSIUG2P_TOKENIZER_ROOT`, and `CHARSIUG2P_TVM_ROOT` to keep mobile path injection simple.
   - Repo root has a `dist` symlink to `python/dist` so Rust tooling matches the Python default layout.
 
+## FRB API (initial implementation)
+
+- New crate: `rust/g2p_ffi` exposes Flutter Rust Bridge APIs with an opaque `G2pModel`.
+- `G2pModelConfig` fields: `asset_root`, `checkpoint`, `target`, `max_input_bytes`, `max_output_len`, `batch_size`, `tvm_ext`, `use_kv_cache`, `device`, `device_id`, `tokenizer_root`, `tvm_root`.
+- Defaults:
+  - `checkpoint=charsiu/g2p_multilingual_byT5_tiny_8_layers_100`
+  - `target=metal-ios` on iOS, `vulkan` on Android, `llvm` elsewhere
+  - `use_kv_cache=true`, `device` inferred from `target` when unset
+- Tokenizer is ByT5-only: `g2p_ffi` validates tokenizer metadata (`byt5_offset` or tokenizer name containing `byt5`) and errors otherwise.
+- Errors are structured as `G2pFfiError { kind, message, details }` with `G2pErrorKind` (config, artifact, tokenizer, tvm, device, inference).
+
 ## Scaffolding (repo layout)
 
 - `rust/` (Cargo workspace)

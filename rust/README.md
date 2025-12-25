@@ -5,6 +5,7 @@ This directory contains the Rust implementation of the CharsiuG2P TVM pipeline p
 ## Crates
 
 - `g2p_core`: prefixing logic and input length validation.
+- `g2p_ffi`: Flutter Rust Bridge API layer (opaque model handle + structured errors).
 - `g2p_tokenizer`: ByT5 byte tokenizer and `tokenizer.json` backend support.
 - `g2p_tvm`: TVM module loader and tensor helpers via `tvm-ffi`.
 - `g2p_pipeline`: pipeline wiring plus artifact auto-discovery helpers.
