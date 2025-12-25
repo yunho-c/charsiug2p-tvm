@@ -32,8 +32,30 @@ class _G2pHomeState extends State<G2pHome> {
   final _langController = TextEditingController(text: 'eng-us');
   final _wordsController = TextEditingController(text: 'Char siu');
 
+  final List<String> _targets = const [
+    'metal-ios',
+    'metal-macos',
+    'llvm',
+    'vulkan',
+    'opencl',
+    'cuda',
+    'rocm',
+    'webgpu',
+  ];
+  final List<String> _devices = const [
+    'metal',
+    'cpu',
+    'vulkan',
+    'opencl',
+    'cuda',
+    'rocm',
+    'webgpu',
+  ];
+
   CharsiuG2p? _model;
   String? _modelAssetRoot;
+  String _target = 'metal-ios';
+  String _device = 'metal';
   String _result = '';
   String _error = '';
   bool _loading = false;
@@ -68,7 +90,11 @@ class _G2pHomeState extends State<G2pHome> {
       }
 
       if (_model == null || _modelAssetRoot != assetRoot) {
-        _model = await CharsiuG2p.load(assetRoot: assetRoot);
+        _model = await CharsiuG2p.load(
+          assetRoot: assetRoot,
+          target: _target,
+          device: _device,
+        );
         _modelAssetRoot = assetRoot;
       }
 
@@ -108,6 +134,53 @@ class _G2pHomeState extends State<G2pHome> {
               labelText: 'Asset root path',
               hintText: '/path/to/assets',
             ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Place assets under <assetRoot>/tokenizers/<checkpoint>/in{max_input_bytes}_out{max_output_len}/ '
+            'and <assetRoot>/tvm/<checkpoint>/b{batch_size}_in{max_input_bytes}_out{max_output_len}/<target>/',
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: _target,
+            items: _targets
+                .map((value) => DropdownMenuItem(
+                      value: value,
+                      child: Text(value),
+                    ))
+                .toList(),
+            onChanged: _loading
+                ? null
+                : (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _target = value;
+                    });
+                  },
+            decoration: const InputDecoration(labelText: 'Target'),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: _device,
+            items: _devices
+                .map((value) => DropdownMenuItem(
+                      value: value,
+                      child: Text(value),
+                    ))
+                .toList(),
+            onChanged: _loading
+                ? null
+                : (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _device = value;
+                    });
+                  },
+            decoration: const InputDecoration(labelText: 'Device'),
           ),
           const SizedBox(height: 12),
           TextField(
