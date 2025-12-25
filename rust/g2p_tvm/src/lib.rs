@@ -207,6 +207,28 @@ impl TvmModule {
         })
     }
 
+    pub fn from_module(module: Module, label: impl Into<PathBuf>) -> Self {
+        Self {
+            module,
+            path: label.into(),
+        }
+    }
+
+    pub fn from_system_lib(prefix: &str) -> Result<Self, TvmError> {
+        let system_lib = Function::get_global("ffi.SystemLib")?;
+        let module_any = if prefix.is_empty() {
+            system_lib.call_tuple(())?
+        } else {
+            let prefix_arg = tvm_ffi::String::from(prefix);
+            system_lib.call_tuple((prefix_arg,))?
+        };
+        let module: Module = module_any.try_into()?;
+        Ok(Self::from_module(
+            module,
+            PathBuf::from(format!("<system-lib:{prefix}>")),
+        ))
+    }
+
     pub fn main(&self) -> Result<Function, TvmError> {
         self.module.get_function(MAIN_FUNCTION).map_err(|_error| {
             TvmError::MissingFunction {
@@ -216,7 +238,8 @@ impl TvmModule {
         })
     }
 
-    fn load_entry(self, name: &str, vm_config: VmConfig) -> Result<LoadedModule, TvmError> {
+    pub fn load_entry(self, name: &str, device: DeviceConfig) -> Result<LoadedModule, TvmError> {
+        let vm_config = VmConfig::new(device);
         if let Ok(function) = self.module.get_function(name) {
             return Ok(LoadedModule {
                 library: self.module,
@@ -268,13 +291,12 @@ impl TvmExecutable {
         device: DeviceConfig,
     ) -> Result<Self, TvmError> {
         artifacts.validate()?;
-        let vm_config = VmConfig::new(device);
-        let encoder = TvmModule::load(&artifacts.encoder)?.load_entry(MAIN_FUNCTION, vm_config)?;
-        let decoder = TvmModule::load(&artifacts.decoder)?.load_entry(MAIN_FUNCTION, vm_config)?;
+        let encoder = TvmModule::load(&artifacts.encoder)?.load_entry(MAIN_FUNCTION, device)?;
+        let decoder = TvmModule::load(&artifacts.decoder)?.load_entry(MAIN_FUNCTION, device)?;
         let (decoder_prefill, decoder_step) = match (&artifacts.decoder_prefill, &artifacts.decoder_step) {
             (Some(prefill_path), Some(step_path)) => (
-                Some(TvmModule::load(prefill_path)?.load_entry(MAIN_FUNCTION, vm_config)?),
-                Some(TvmModule::load(step_path)?.load_entry(MAIN_FUNCTION, vm_config)?),
+                Some(TvmModule::load(prefill_path)?.load_entry(MAIN_FUNCTION, device)?),
+                Some(TvmModule::load(step_path)?.load_entry(MAIN_FUNCTION, device)?),
             ),
             (None, None) => (None, None),
             _ => {
@@ -396,12 +418,18 @@ impl VmConfig {
     }
 }
 
-struct LoadedModule {
+pub struct LoadedModule {
     #[allow(dead_code)]
     library: Module,
     #[allow(dead_code)]
     executable: Option<Module>,
     entry: Function,
+}
+
+impl LoadedModule {
+    pub fn entry(&self) -> &Function {
+        &self.entry
+    }
 }
 
 fn initialize_vm(vm_init: &Function, config: VmConfig) -> Result<(), TvmError> {
