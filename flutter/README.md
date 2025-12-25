@@ -29,3 +29,13 @@ Future<void> runG2p() async {
   print(phones);
 }
 ```
+
+## Example app
+
+The example Flutter app lives under `flutter/example/`. Run it with:
+
+```bash
+cd flutter/example
+flutter pub get
+flutter run
+```

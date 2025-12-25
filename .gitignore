@@ -94,3 +94,5 @@ python/pixi.lock
 !flutter/lib/
 !flutter/lib/**
 !flutter/lib/src/*.io.dart
+!flutter/example/lib/
+!flutter/example/lib/**

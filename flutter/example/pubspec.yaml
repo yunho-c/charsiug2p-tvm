@@ -1,0 +1,16 @@
+name: charsiug2p_flutter_example
+description: Example app for charsiug2p_flutter.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  charsiug2p_flutter:
+    path: ..
+
+flutter:
+  uses-material-design: true
