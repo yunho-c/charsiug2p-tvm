@@ -57,6 +57,20 @@ def _parse_batch_sizes(values: list[str] | None) -> list[int]:
     return sorted(set(sizes))
 
 
+_STRESS_TRANSLATION = str.maketrans("", "", "ˈˌ")
+
+
+def _strip_stress_marks(text: str) -> str:
+    return text.translate(_STRESS_TRANSLATION)
+
+
+def _print_sentence_output(phones: list[str], *, no_stress: bool) -> None:
+    if no_stress:
+        phones = [_strip_stress_marks(phoneme) for phoneme in phones]
+    sentence = " ".join(phones)
+    console.print(f"Sentence: {sentence}")
+
+
 def _format_list(values: list[object] | None) -> str:
     if not values:
         return "(none)"
@@ -255,6 +269,16 @@ def run_model(
     max_output_len: int = typer.Option(DEFAULT_CONFIG.max_output_len, help="Max output length."),
     space_after_colon: bool = typer.Option(False, help="Insert a space after the language prefix."),
     device: str = typer.Option("cpu", help="Torch device to run on."),
+    sentence: bool = typer.Option(
+        False,
+        "--sentence/--no-sentence",
+        help="Also print a single concatenated sentence output.",
+    ),
+    no_stress: bool | None = typer.Option(
+        None,
+        "--no-stress/--stress",
+        help="Strip stress marks from sentence output (defaults to on with --sentence).",
+    ),
 ) -> None:
     """Run a reference G2P inference using transformers."""
     phones = reference_g2p(
@@ -272,6 +296,8 @@ def run_model(
     for word, phoneme in zip(words, phones):
         table.add_row(word, phoneme)
     console.print(table)
+    if sentence:
+        _print_sentence_output(phones, no_stress=sentence if no_stress is None else no_stress)
 
 
 @app.command("run-tvm")
@@ -306,6 +332,16 @@ def run_tvm_model(
         True,
         "--kv-cache/--no-kv-cache",
         help="Use experimental KV-cache prefill/step artifacts.",
+    ),
+    sentence: bool = typer.Option(
+        False,
+        "--sentence/--no-sentence",
+        help="Also print a single concatenated sentence output.",
+    ),
+    no_stress: bool | None = typer.Option(
+        None,
+        "--no-stress/--stress",
+        help="Strip stress marks from sentence output (defaults to on with --sentence).",
     ),
 ) -> None:
     """Run G2P inference using compiled TVM artifacts."""
@@ -348,6 +384,8 @@ def run_tvm_model(
     for word, phoneme in zip(words, phones):
         table.add_row(word, phoneme)
     console.print(table)
+    if sentence:
+        _print_sentence_output(phones, no_stress=sentence if no_stress is None else no_stress)
 
 
 @app.command("verify")
