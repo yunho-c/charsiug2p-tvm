@@ -89,3 +89,8 @@ $RECYCLE.BIN/
 .Trash-*
 .nfs*
 python/pixi.lock
+
+# Flutter package sources
+!flutter/lib/
+!flutter/lib/**
+!flutter/lib/src/*.io.dart

@@ -43,7 +43,7 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
 - Errors are structured as `G2pFfiError { kind, message, details }` with `G2pErrorKind` (config, artifact, tokenizer, tvm, device, inference).
 - `g2p_ffi` builds `cdylib` + `staticlib` outputs for Flutter (in addition to the Rust `lib` artifact).
 - FRB API definitions live in `rust/g2p_ffi/src/api.rs`; `rust/g2p_ffi/src/lib.rs` only wires `pub mod api;` and `mod frb_generated;`.
-- Codegen config: `flutter/flutter_rust_bridge.yaml`, outputs `flutter/lib/{api.dart,frb_generated*.dart}` and `rust/g2p_ffi/src/frb_generated.rs`.
+- Codegen config: `flutter/flutter_rust_bridge.yaml`, outputs `flutter/lib/src/{api.dart,frb_generated*.dart}` and `rust/g2p_ffi/src/frb_generated.rs`.
 - Codegen command: `flutter_rust_bridge_codegen generate --config-file flutter/flutter_rust_bridge.yaml`.
 - Codegen requires Flutter/Dart tooling plus `tvm-ffi-config` on `PATH` (e.g., `python/.pixi/envs/default/bin`) since it runs `cargo expand` on the Rust crate.
 

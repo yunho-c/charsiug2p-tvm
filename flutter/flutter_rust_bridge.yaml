@@ -1,4 +1,4 @@
 rust_input: crate::api
 rust_root: ../rust/g2p_ffi
-dart_output: lib
+dart_output: lib/src
 dart_entrypoint_class_name: G2pBridge
