@@ -275,6 +275,7 @@ The current implementation uses `libtool` for combining static archives, so the 
 - Force-loading the static archive is required to keep `__tvm_module_startup` and registration symbols from being stripped; without it, the runtime fails with `vm_load_executable` missing from `<system-lib:...>`.
 - Using `cargo:rustc-link-lib=static:+whole-archive=...` in `rust/g2p_tvm/build.rs` is the reliable way to force-load across dependent crates (the previous `rustc-link-arg=-Wl,-force_load,...` did not propagate to `g2p_cli`).
 - The Rust build now supports `G2P_TVM_RUNTIME_LIB` to link `libtvm_runtime.dylib` and `G2P_TVM_SYSTEM_LIB` to link a static system-lib archive (plus whole-archive semantics).
+- Static linking for the TVM runtime/ffi can be enabled with `G2P_TVM_STATIC_LINK=1`; optionally set `G2P_TVM_FFI_LIB_DIR` (and `G2P_TVM_FFI_STATIC_NAME` on iOS) to point at static tvm-ffi builds. `G2P_TVM_LINK_FFI_TESTING=1` re-enables linking tvm-ffi testing symbols when needed.
 
 ### `system_lib_metadata.json` schema
 
