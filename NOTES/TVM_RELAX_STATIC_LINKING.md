@@ -247,3 +247,31 @@ cargo test -p charsiug2p-g2p-tvm system_lib_smoke
 ```
 
 The test loads the system lib, initializes the VM, calls `main`, and checks that `1.5 -> 2.5` as expected.
+
+### System-lib compile path (Python)
+
+The Python `compile` command now supports a system-lib export that emits:
+
+- `libg2p_system_lib.a` (static archive containing encoder/decoder/prefill/step)
+- `system_lib_metadata.json` (prefix mapping for Rust)
+
+Example (macOS, cacheless):
+
+```bash
+py -3.12 -m charsiug2p_tvm compile \
+  --checkpoint charsiu/g2p_multilingual_byT5_tiny_8_layers_100 \
+  --target llvm \
+  --system-lib \
+  --system-lib-prefix g2p_
+```
+
+The metadata JSON contains the prefixes that Rust uses via `ArtifactResolver::resolve_system_lib_prefixes()`.
+The current implementation uses `libtool` for combining static archives, so the one-shot `--system-lib` export is macOS-only for now.
+
+Rust CLI can now opt into system-lib loading (single batch size only):
+
+```bash
+G2P_TVM_SYSTEM_LIB=/path/to/libg2p_system_lib.a \
+G2P_TVM_RUNTIME_LIB=/path/to/libtvm_runtime.dylib \
+cargo run -p charsiug2p-g2p-cli -- --system-lib --tvm-target llvm --lang eng-us Char siu
+```

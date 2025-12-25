@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 
 from charsiug2p_tvm.config import DEFAULT_CONFIG, resolve_target
 
@@ -14,6 +18,37 @@ class ExportedModules:
     decoder_step: "tvm.IRModule | None" = None
 
 
+@dataclass(frozen=True)
+class SystemLibMetadata:
+    archive: str
+    prefix_base: str
+    prefixes: dict[str, str]
+    checkpoint: str
+    batch_size: int
+    max_input_bytes: int
+    max_output_len: int
+    target: str
+    output_ext: str
+    use_kv_cache: bool
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "archive": self.archive,
+                "prefix_base": self.prefix_base,
+                "prefixes": self.prefixes,
+                "checkpoint": self.checkpoint,
+                "batch_size": self.batch_size,
+                "max_input_bytes": self.max_input_bytes,
+                "max_output_len": self.max_output_len,
+                "target": self.target,
+                "output_ext": self.output_ext,
+                "use_kv_cache": self.use_kv_cache,
+            },
+            indent=2,
+        )
+
+
 def _relax_pipeline_for_target(
     target: "tvm.target.Target",
     *,
@@ -21,6 +56,7 @@ def _relax_pipeline_for_target(
 ) -> "tvm.transform.Pass":
     import tvm
     import tvm.relax as relax
+    from tvm.contrib import cc
 
     if skip_dlight_gemv and target.kind.name in {"cuda", "rocm", "metal", "vulkan", "opencl", "webgpu"}:
         from tvm import dlight as dl
@@ -66,6 +102,35 @@ def default_output_dir(
     safe_name = checkpoint.replace("/", "_")
     details = f"b{batch_size}_in{max_input_bytes}_out{max_output_len}"
     return Path("dist") / "tvm" / safe_name / details / target
+
+
+def _normalize_prefix(prefix: str) -> str:
+    prefix = prefix.strip()
+    if not prefix:
+        raise ValueError("system_lib_prefix must be non-empty")
+    if not prefix.endswith("_"):
+        return f"{prefix}_"
+    return prefix
+
+
+def _system_lib_prefixes(base_prefix: str, *, use_kv_cache: bool) -> dict[str, str]:
+    base_prefix = _normalize_prefix(base_prefix)
+    prefixes = {"encoder": f"{base_prefix}encoder_"}
+    if use_kv_cache:
+        prefixes["decoder_prefill"] = f"{base_prefix}decoder_prefill_"
+        prefixes["decoder_step"] = f"{base_prefix}decoder_step_"
+    else:
+        prefixes["decoder"] = f"{base_prefix}decoder_"
+    return prefixes
+
+
+def _combine_static_libs(output_path: Path, libs: list[Path]) -> None:
+    if not libs:
+        raise ValueError("No static libraries to combine.")
+    if sys.platform != "darwin":
+        raise RuntimeError("Static lib combining is only implemented for macOS currently.")
+    cmd = ["libtool", "-static", "-o", str(output_path)] + [str(lib) for lib in libs]
+    subprocess.run(cmd, check=True)
 
 
 def export_torch_model(
@@ -391,6 +456,9 @@ def compile_tvm_module(
     fp16_input_names: list[str] | None = None,
     use_kv_cache: bool = False,
     skip_dlight_gemv: bool = False,
+    system_lib: bool = False,
+    system_lib_prefix: str = "g2p_",
+    system_lib_name: str = "libg2p_system_lib.a",
 ) -> dict[str, Path]:
     """Compile encoder/decoder modules into TVM runtime artifacts."""
     resolved = resolve_target(target, output_ext=output_ext)
@@ -449,19 +517,59 @@ def compile_tvm_module(
     if mods.decoder_step is not None:
         module_map["decoder_step"] = mods.decoder_step
 
-    for name, mod in module_map.items():
-        exec_obj = relax.build(
-            mod,
-            target=target_obj,
-            exec_mode="bytecode",
-            relax_pipeline=relax_pipeline,
-        )
-        out_path = output_dir / f"{name}.{output_ext}"
-        exec_obj.export_library(str(out_path))
-        artifacts[name] = out_path
+    if system_lib:
+        prefixes = _system_lib_prefixes(system_lib_prefix, use_kv_cache=use_kv_cache)
+        temp_dir = Path(tempfile.mkdtemp(prefix="tvm_system_lib_"))
+        static_libs: list[Path] = []
+        for name, mod in module_map.items():
+            prefix = prefixes.get(name)
+            if prefix is None:
+                raise ValueError(f"Missing system-lib prefix for {name}")
+            mod = mod.with_attr("system_lib_prefix", prefix)
+            exec_obj = relax.build(
+                mod,
+                target=target_obj,
+                exec_mode="bytecode",
+                relax_pipeline=relax_pipeline,
+            )
+            lib_path = temp_dir / f"lib{name}.a"
+            exec_obj.export_library(str(lib_path), fcompile=cc.create_staticlib)
+            static_libs.append(lib_path)
+            script_path = output_dir / f"{name}.relax.py"
+            script_path.write_text(mod.script(show_meta=True), encoding="utf-8")
 
-        script_path = output_dir / f"{name}.relax.py"
-        script_path.write_text(mod.script(show_meta=True), encoding="utf-8")
+        archive_path = output_dir / system_lib_name
+        _combine_static_libs(archive_path, static_libs)
+        metadata = SystemLibMetadata(
+            archive=archive_path.name,
+            prefix_base=_normalize_prefix(system_lib_prefix),
+            prefixes=prefixes,
+            checkpoint=checkpoint,
+            batch_size=batch_size,
+            max_input_bytes=max_input_bytes,
+            max_output_len=max_output_len,
+            target=target_name,
+            output_ext=output_ext,
+            use_kv_cache=use_kv_cache,
+        )
+        metadata_path = output_dir / "system_lib_metadata.json"
+        metadata_path.write_text(metadata.to_json() + "\n", encoding="utf-8")
+        artifacts["system_lib"] = archive_path
+        artifacts["system_lib_metadata"] = metadata_path
+    else:
+        for name, mod in module_map.items():
+            exec_obj = relax.build(
+                mod,
+                target=target_obj,
+                exec_mode="bytecode",
+                relax_pipeline=relax_pipeline,
+            )
+            out_path = output_dir / f"{name}.{output_ext}"
+            exec_obj.export_library(str(out_path))
+            artifacts[name] = out_path
+
+            script_path = output_dir / f"{name}.relax.py"
+            script_path.write_text(mod.script(show_meta=True), encoding="utf-8")
 
     metadata_entries = [
         f"checkpoint={checkpoint}",
@@ -476,7 +584,11 @@ def compile_tvm_module(
         f"mixed_precision={mixed_precision}",
         f"mixed_precision_out_dtype={mixed_precision_out_dtype}",
         f"mixed_precision_fp16_inputs={','.join(fp16_input_names or [])}",
+        f"system_lib={system_lib}",
     ]
+    if system_lib:
+        metadata_entries.append(f"system_lib_prefix={_normalize_prefix(system_lib_prefix)}")
+        metadata_entries.append(f"system_lib_name={system_lib_name}")
     if resolved.export_func:
         metadata_entries.append(f"export_func={resolved.export_func}")
     metadata_path = output_dir / "compile_metadata.txt"

@@ -3,7 +3,8 @@ use std::path::Path;
 use charsiug2p_g2p_core::{prepare_prefixed_words, G2pConfig, G2pError};
 use charsiug2p_g2p_tokenizer::{load_tokenizer_handle, TokenizerBackend, TokenizerError, TokenizerHandle};
 use charsiug2p_g2p_tvm::{
-    tensor_from_i64_device, tensor_to_vec_f32, DeviceConfig, TvmArtifacts, TvmError, TvmExecutable,
+    tensor_from_i64_device, tensor_to_vec_f32, DeviceConfig, SystemLibPrefixes, TvmArtifacts,
+    TvmError, TvmExecutable,
 };
 
 mod artifacts;
@@ -17,6 +18,7 @@ pub enum PipelineError {
     BatchSizeOverflow { expected: usize, got: usize },
     MissingEosToken,
     MissingKvArtifacts,
+    MissingDecoder,
 }
 
 impl std::fmt::Display for PipelineError {
@@ -30,6 +32,7 @@ impl std::fmt::Display for PipelineError {
             }
             PipelineError::MissingEosToken => write!(f, "Missing EOS token id"),
             PipelineError::MissingKvArtifacts => write!(f, "KV-cache artifacts are missing or incomplete."),
+            PipelineError::MissingDecoder => write!(f, "Decoder module is missing for cacheless decode."),
         }
     }
 }
@@ -101,6 +104,33 @@ impl G2pPipeline {
         let TokenizerHandle { backend, metadata } = handle;
         let tokenizer = backend;
         let tvm = TvmExecutable::load_with_device(&artifacts, config.device)?;
+        let config = PipelineConfig {
+            eos_token_id: config.eos_token_id.or(metadata.eos_token_id),
+            pad_token_id: config.pad_token_id.or(metadata.pad_token_id),
+            ..config
+        };
+        if config.use_kv_cache && !tvm.has_kv_cache() {
+            return Err(PipelineError::MissingKvArtifacts);
+        }
+        Ok(Self { tokenizer, tvm, config })
+    }
+
+    pub fn load_system_lib(
+        tokenizer_metadata: impl AsRef<Path>,
+        prefixes: SystemLibPrefixes,
+        config: PipelineConfig,
+    ) -> Result<Self, PipelineError> {
+        let handle = load_tokenizer_handle(tokenizer_metadata, config.max_input_bytes)?;
+        let TokenizerHandle { backend, metadata } = handle;
+        let tokenizer = backend;
+        if config.use_kv_cache {
+            if !prefixes.has_kv_cache() {
+                return Err(PipelineError::MissingKvArtifacts);
+            }
+        } else if prefixes.decoder.is_none() {
+            return Err(PipelineError::MissingDecoder);
+        }
+        let tvm = TvmExecutable::load_system_lib(&prefixes, config.device, config.use_kv_cache)?;
         let config = PipelineConfig {
             eos_token_id: config.eos_token_id.or(metadata.eos_token_id),
             pad_token_id: config.pad_token_id.or(metadata.pad_token_id),

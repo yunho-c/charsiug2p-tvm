@@ -1,7 +1,9 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use charsiug2p_g2p_tvm::TvmArtifacts;
+use charsiug2p_g2p_tvm::{SystemLibPrefixes, TvmArtifacts};
+use serde::Deserialize;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct ArtifactSpec {
@@ -75,6 +77,8 @@ pub enum ArtifactError {
         prefill_candidates: Vec<PathBuf>,
         step_candidates: Vec<PathBuf>,
     },
+    MissingSystemLibMetadata { candidates: Vec<PathBuf> },
+    InvalidSystemLibMetadata { message: String },
 }
 
 impl fmt::Display for ArtifactError {
@@ -109,6 +113,16 @@ impl fmt::Display for ArtifactError {
                     format_candidates(step_candidates)
                 )
             }
+            ArtifactError::MissingSystemLibMetadata { candidates } => {
+                write!(
+                    f,
+                    "System-lib metadata not found. Tried: {}",
+                    format_candidates(candidates)
+                )
+            }
+            ArtifactError::InvalidSystemLibMetadata { message } => {
+                write!(f, "Invalid system-lib metadata: {message}")
+            }
         }
     }
 }
@@ -118,6 +132,36 @@ impl std::error::Error for ArtifactError {}
 #[derive(Debug, Clone)]
 pub struct ArtifactResolver {
     roots: Vec<ArtifactRoots>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SystemLibMetadata {
+    prefixes: HashMap<String, String>,
+}
+
+fn load_system_lib_metadata(path: &Path) -> Result<SystemLibMetadata, ArtifactError> {
+    let content = std::fs::read_to_string(path).map_err(|err| ArtifactError::InvalidSystemLibMetadata {
+        message: err.to_string(),
+    })?;
+    serde_json::from_str(&content).map_err(|err| ArtifactError::InvalidSystemLibMetadata {
+        message: err.to_string(),
+    })
+}
+
+fn prefixes_from_metadata(metadata: SystemLibMetadata) -> Result<SystemLibPrefixes, ArtifactError> {
+    let encoder = metadata
+        .prefixes
+        .get("encoder")
+        .cloned()
+        .ok_or_else(|| ArtifactError::InvalidSystemLibMetadata {
+            message: "missing encoder prefix".to_string(),
+        })?;
+    Ok(SystemLibPrefixes {
+        encoder,
+        decoder: metadata.prefixes.get("decoder").cloned(),
+        decoder_prefill: metadata.prefixes.get("decoder_prefill").cloned(),
+        decoder_step: metadata.prefixes.get("decoder_step").cloned(),
+    })
 }
 
 impl ArtifactResolver {
@@ -201,6 +245,26 @@ impl ArtifactResolver {
             encoder_candidates,
             decoder_candidates,
         })
+    }
+
+    pub fn resolve_system_lib_prefixes(&self, spec: &ArtifactSpec) -> Result<SystemLibPrefixes, ArtifactError> {
+        let safe_checkpoint = spec.safe_checkpoint();
+        let subdir = spec.tvm_subdir();
+        let mut candidates = Vec::new();
+        for root in &self.roots {
+            let path = root
+                .tvm_dir()
+                .join(&safe_checkpoint)
+                .join(&subdir)
+                .join(&spec.target)
+                .join("system_lib_metadata.json");
+            if path.exists() {
+                let metadata = load_system_lib_metadata(&path)?;
+                return prefixes_from_metadata(metadata);
+            }
+            candidates.push(path);
+        }
+        Err(ArtifactError::MissingSystemLibMetadata { candidates })
     }
 }
 

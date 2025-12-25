@@ -125,6 +125,7 @@ impl From<PipelineError> for G2pFfiError {
             PipelineError::BatchSizeOverflow { .. } => G2pFfiError::new(G2pErrorKind::Config, err.to_string()),
             PipelineError::MissingEosToken => G2pFfiError::new(G2pErrorKind::Tokenizer, err.to_string()),
             PipelineError::MissingKvArtifacts => G2pFfiError::new(G2pErrorKind::Artifact, err.to_string()),
+            PipelineError::MissingDecoder => G2pFfiError::new(G2pErrorKind::Artifact, err.to_string()),
         }
     }
 }
