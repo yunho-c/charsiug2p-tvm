@@ -5,29 +5,25 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
 ## Goals and scope
 
 - Provide a Rust API that mirrors the Python pipeline:
-  - Prefix words with "<lang>:"
-  - Tokenize with ByT5 tokenizer (google/byt5-small)
-  - Run TVM-compiled encoder/decoder (or prefill/step for KV-cache)
-  - Greedy decode and return phoneme strings
-  - KV-cache path uses decoder_prefill/decoder_step outputs (logits, past_k, past_v, cur_pos) to step tokens one at a time
+  - [x] Prefix words with "<lang>:"
+  - [x] Tokenize with ByT5 tokenizer (google/byt5-small)
+  - [x] Run TVM-compiled encoder/decoder (or prefill/step for KV-cache)
+  - [x] Greedy decode and return phoneme strings
+  - [x] KV-cache path uses decoder_prefill/decoder_step outputs (logits, past_k, past_v, cur_pos) to step tokens one at a time
 - Target Flutter (iOS + Android) via FRB.
 - Reuse compiled artifacts from `python/src/charsiug2p_tvm/tvm_compile.py`.
 
-## Key decisions (to lock in early)
+## Key decisions
 
-- Runtime strategy:
-  - Option A (recommended first): Relax VM with a thin C++ wrapper that exposes a C ABI to Rust for load + invoke.
-  - Option A.1: Evaluate the vendored `tvm-ffi` Rust crates (linked to `libtvm_ffi`) to load modules and call packed functions before adding custom FFI.
-  - Option B: Compile to AOT and call directly via TVM C runtime (less VM logic).
-  - Note: tvm-ffi's registry may be separate from `libtvm_runtime`, so Relax VM construction might still require the TVM runtime C API or a small C wrapper.
+- Runtime strategy (current):
+  - Use Relax VM bytecode executables and load them via `vm_load_executable` + `vm_initialization` from Rust (tvm-ffi).
+  - AOT remains a future optimization path, not a parallel implementation track.
 - Tokenizer strategy:
-  - Prefer HuggingFace `tokenizers` crate if `tokenizer.json` is available.
-  - If only `tokenizer.model` exists, use a SentencePiece-capable Rust crate.
+  - Support ByT5 only.
   - Export tokenizer assets via Python `AutoTokenizer.save_pretrained(...)` and bundle the resulting files.
-  - Implementation starts with `tokenizer.json` + `tokenizers` crate, and we can add SentencePiece fallback after validation.
-  - ByT5 does not ship a vocab/model file; it tokenizes raw UTF-8 bytes with a fixed offset (pad/eos/unk => offset=3).
+  - ByT5 does not ship a vocab/model file; it tokenizes raw UTF-8 bytes with a fixed offset (pad/eos/unk => offset=3), so no `tokenizer.json` is expected.
 - Artifact metadata:
-  - Add a small manifest (JSON) alongside compiled artifacts capturing: checkpoint, max_input_bytes, max_output_len, batch_size, dtype, target, output_ext, use_kv_cache, tokenizer files, and a version.
+  - `compile_metadata.txt` is already emitted alongside compiled artifacts (we can migrate to JSON later if desired).
 - Artifact discovery (Rust):
   - `g2p_pipeline::ArtifactResolver` auto-derives tokenizer metadata and TVM artifact paths using the `dist/{tokenizers,tvm}/<checkpoint_sanitized>` layout.
   - `ArtifactRoots` supports separate tokenizer/tvm roots so mobile apps can pass per-platform asset storage directories instead of relying on repo-relative paths.
@@ -38,9 +34,9 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
 
 - `rust/` (Cargo workspace)
   - `g2p_core/`: core pipeline (prefixing, tokenization, padding, decode loop)
-  - `tvm_sys/`: low-level FFI bindings to TVM runtime / VM wrapper
-  - `tvm_bridge/` (optional): C++ wrapper with C ABI for Relax VM
-  - `g2p_ffi/`: FRB API layer exposing Rust functions to Flutter
+  - `g2p_tvm/`: TVM runtime bindings (tvm-ffi) + Relax VM loader helpers
+  - `g2p_pipeline/`: TVM + tokenizer pipeline (cacheless + KV-cache)
+  - `g2p_ffi/`: FRB API layer exposing Rust functions to Flutter (planned)
   - `g2p_cli/`: lightweight CLI for local testing
 - `mobile/` (Flutter app or plugin)
   - `assets/`: tokenizer files + compiled TVM artifacts + manifest
@@ -49,28 +45,29 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
 ## Implementation phases
 
 1) Bootstrap + assets
-   - Export tokenizer artifacts from Python and place under `mobile/assets/`.
+   - [x] Export tokenizer artifacts from Python and place under `mobile/assets/`.
    - Compile TVM artifacts for:
-     - dev: `llvm` (desktop validation)
-     - ios: `metal` (arm64)
-     - android: `vulkan` or `opencl` (plus CPU fallback)
-   - Write manifest describing shape limits and artifact layout.
+     - [x] dev: `llvm` (desktop validation)
+     - [x] ios: `metal` (arm64)
+     - [ ] android: `vulkan` or `opencl` (plus CPU fallback)
+   - [x] Write manifest describing shape limits and artifact layout (currently `compile_metadata.txt`).
 
 2) Core Rust pipeline (`g2p_core`)
-   - Prefix + UTF-8 byte-length checks (match `max_input_bytes` behavior).
-   - Tokenize + pad to static shape (max_input_bytes / max_output_len).
-   - Greedy decode loop:
-     - Cacheless path (decoder full length) first.
-     - KV-cache path using prefill/step second.
-   - Decode token IDs to strings, strip special tokens.
+   - [x] Prefix + UTF-8 byte-length checks (match `max_input_bytes` behavior).
+   - [x] Tokenize + pad to static shape (max_input_bytes / max_output_len).
+   - [x] Greedy decode loop:
+     - [x] Cacheless path (decoder full length) first.
+     - [x] KV-cache path using prefill/step second.
+   - [x] Decode token IDs to strings, strip special tokens.
 
-3) TVM runtime integration (`tvm_sys` + wrapper)
+3) TVM runtime integration (`g2p_tvm` + tvm-ffi)
    - Provide Rust-safe calls for:
-     - Load module
-     - Create VM
-     - Call "main" (encoder, decoder, prefill, step)
-     - Manage device selection and tensors
-   - Start with CPU path (llvm) for validation, then GPU targets.
+     - [x] Load module
+     - [x] Create VM
+     - [x] Call "main" (encoder, decoder, prefill, step)
+     - [x] Manage device selection and tensors
+  - Device type must match the compiled target (e.g., Metal artifacts require Metal tensors and VM initialization on Metal).
+   - [x] Start with CPU path (llvm) for validation, then GPU targets.
 
 4) FRB API (`g2p_ffi`)
    - `G2pModel::new(config)` to load assets + artifacts.
@@ -105,6 +102,5 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
 
 ## Open questions
 
-- Confirm tokenizer format availability for ByT5 (JSON vs SentencePiece).
 - Decide VM vs AOT runtime path after a quick prototype.
 - Choose GPU backend defaults per platform (Metal vs Vulkan/OpenCL).
