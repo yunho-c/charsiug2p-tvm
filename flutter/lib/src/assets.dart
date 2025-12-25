@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'platform_paths.dart';
+
 class CharsiuG2pAssets {
   const CharsiuG2pAssets._();
 
@@ -103,5 +105,44 @@ class CharsiuG2pAssets {
       overwrite: overwrite,
       skipPrefixes: const ['tvm/'],
     );
+  }
+
+  /// Resolve the TVM artifacts directory inside the bundled Flutter assets.
+  ///
+  /// This is intended for TVM dylibs that must remain in the app bundle
+  /// (for example iOS/macOS code-signed libraries).
+  static Future<String?> resolveBundleTvmRoot({
+    required String assetPrefix,
+    CharsiuG2pPlatformPaths? platformPaths,
+  }) async {
+    final paths =
+        platformPaths ?? await CharsiuG2pPlatformChannels.getPaths();
+    final resourceDir = paths.resourceDir;
+    if (resourceDir == null) {
+      return null;
+    }
+    final flutterAssetsRoot = _resolveFlutterAssetsRoot(resourceDir);
+    final normalizedPrefix = _normalizePrefix(assetPrefix);
+    final prefixDir = normalizedPrefix.endsWith('/')
+        ? normalizedPrefix.substring(0, normalizedPrefix.length - 1)
+        : normalizedPrefix;
+    return p.join(flutterAssetsRoot, prefixDir, 'tvm');
+  }
+
+  static String _resolveFlutterAssetsRoot(String resourceDir) {
+    final normalized = p.normalize(resourceDir);
+    if (p.basename(normalized) == 'flutter_assets') {
+      return normalized;
+    }
+    final candidate = p.join(normalized, 'flutter_assets');
+    if (Directory(candidate).existsSync()) {
+      return candidate;
+    }
+    final iosCandidate =
+        p.join(normalized, 'Frameworks', 'App.framework', 'flutter_assets');
+    if (Directory(iosCandidate).existsSync()) {
+      return iosCandidate;
+    }
+    return candidate;
   }
 }

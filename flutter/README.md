@@ -28,9 +28,15 @@ Future<void> runG2p() async {
   final assetRoot = await CharsiuG2pAssets.prepareTokenizerRoot(
     assetPrefix: 'assets/charsiug2p',
   );
+  final tvmRoot = await CharsiuG2pAssets.resolveBundleTvmRoot(
+    assetPrefix: 'assets/charsiug2p',
+  );
 
   await CharsiuG2p.init();
-  final g2p = await CharsiuG2p.load(assetRoot: assetRoot);
+  final g2p = await CharsiuG2p.load(
+    assetRoot: assetRoot,
+    tvmRoot: tvmRoot,
+  );
   final phones = await g2p.run(['Char', 'siu'], 'eng-us');
   print(phones);
 }
