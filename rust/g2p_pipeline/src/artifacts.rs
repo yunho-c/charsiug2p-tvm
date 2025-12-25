@@ -71,6 +71,10 @@ pub enum ArtifactError {
         encoder_candidates: Vec<PathBuf>,
         decoder_candidates: Vec<PathBuf>,
     },
+    MissingKvArtifacts {
+        prefill_candidates: Vec<PathBuf>,
+        step_candidates: Vec<PathBuf>,
+    },
 }
 
 impl fmt::Display for ArtifactError {
@@ -92,6 +96,17 @@ impl fmt::Display for ArtifactError {
                     "TVM artifacts not found. Encoder tried: {}. Decoder tried: {}",
                     format_candidates(encoder_candidates),
                     format_candidates(decoder_candidates)
+                )
+            }
+            ArtifactError::MissingKvArtifacts {
+                prefill_candidates,
+                step_candidates,
+            } => {
+                write!(
+                    f,
+                    "KV-cache artifacts not found. decoder_prefill tried: {}. decoder_step tried: {}",
+                    format_candidates(prefill_candidates),
+                    format_candidates(step_candidates)
                 )
             }
         }
@@ -138,11 +153,15 @@ impl ArtifactResolver {
         &self,
         spec: &ArtifactSpec,
         ext_hint: Option<&str>,
+        with_cache: bool,
     ) -> Result<TvmArtifacts, ArtifactError> {
         let safe_checkpoint = spec.safe_checkpoint();
         let subdir = spec.tvm_subdir();
         let mut encoder_candidates = Vec::new();
         let mut decoder_candidates = Vec::new();
+        let mut prefill_candidates = Vec::new();
+        let mut step_candidates = Vec::new();
+        let mut found_base = false;
         for root in &self.roots {
             let target_dir = root
                 .tvm_dir()
@@ -154,10 +173,29 @@ impl ArtifactResolver {
             let encoder = first_existing(&encoder_paths);
             let decoder = first_existing(&decoder_paths);
             if let (Some(encoder), Some(decoder)) = (encoder, decoder) {
-                return Ok(TvmArtifacts::new(encoder, decoder));
+                found_base = true;
+                if !with_cache {
+                    return Ok(TvmArtifacts::new(encoder, decoder));
+                }
+                let prefill_paths = module_candidates(&target_dir, "decoder_prefill", ext_hint);
+                let step_paths = module_candidates(&target_dir, "decoder_step", ext_hint);
+                let prefill = first_existing(&prefill_paths);
+                let step = first_existing(&step_paths);
+                if let (Some(prefill), Some(step)) = (prefill, step) {
+                    return Ok(TvmArtifacts::new(encoder, decoder).with_cache(prefill, step));
+                }
+                prefill_candidates.extend(prefill_paths);
+                step_candidates.extend(step_paths);
+                continue;
             }
             encoder_candidates.extend(encoder_paths);
             decoder_candidates.extend(decoder_paths);
+        }
+        if with_cache && found_base {
+            return Err(ArtifactError::MissingKvArtifacts {
+                prefill_candidates,
+                step_candidates,
+            });
         }
         Err(ArtifactError::MissingTvmArtifacts {
             encoder_candidates,

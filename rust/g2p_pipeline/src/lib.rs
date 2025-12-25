@@ -14,6 +14,7 @@ pub enum PipelineError {
     Tvm(TvmError),
     BatchSizeOverflow { expected: usize, got: usize },
     MissingEosToken,
+    MissingKvArtifacts,
 }
 
 impl std::fmt::Display for PipelineError {
@@ -26,6 +27,7 @@ impl std::fmt::Display for PipelineError {
                 write!(f, "Batch size overflow: expected {expected}, got {got}")
             }
             PipelineError::MissingEosToken => write!(f, "Missing EOS token id"),
+            PipelineError::MissingKvArtifacts => write!(f, "KV-cache artifacts are missing or incomplete."),
         }
     }
 }
@@ -57,16 +59,23 @@ pub struct PipelineConfig {
     pub batch_size: usize,
     pub eos_token_id: Option<i64>,
     pub pad_token_id: Option<i64>,
+    pub use_kv_cache: bool,
 }
 
 impl PipelineConfig {
-    pub fn from_core(config: &G2pConfig, batch_size: usize, eos_token_id: Option<i64>) -> Self {
+    pub fn from_core(
+        config: &G2pConfig,
+        batch_size: usize,
+        eos_token_id: Option<i64>,
+        use_kv_cache: bool,
+    ) -> Self {
         Self {
             max_input_bytes: config.max_input_bytes,
             max_output_len: config.max_output_len,
             batch_size,
             eos_token_id,
             pad_token_id: None,
+            use_kv_cache,
         }
     }
 }
@@ -92,6 +101,9 @@ impl G2pPipeline {
             pad_token_id: config.pad_token_id.or(metadata.pad_token_id),
             ..config
         };
+        if config.use_kv_cache && !tvm.has_kv_cache() {
+            return Err(PipelineError::MissingKvArtifacts);
+        }
         Ok(Self { tokenizer, tvm, config })
     }
 
@@ -119,34 +131,23 @@ impl G2pPipeline {
             let encoder_mask = tensor_from_i64(&attention_mask, &[batch_size as i64, encoded.max_length as i64])?;
             let encoder_states = self.tvm.call_encoder(&encoder_input, &encoder_mask)?;
 
-            let mut generated = vec![pad_token_id; batch_size * self.config.max_output_len];
-
-            let eos_token_id = self.config.eos_token_id.ok_or(PipelineError::MissingEosToken)?;
-            let mut finished = vec![false; batch_size];
-            for step in 1..self.config.max_output_len {
-                let decoder_input = tensor_from_i64(
-                    &generated,
-                    &[batch_size as i64, self.config.max_output_len as i64],
-                )?;
-                let logits = self.tvm.call_decoder(&decoder_input, &encoder_states, &encoder_mask)?;
-                let next_tokens = argmax_last_token(
-                    &logits,
+            let generated = if self.config.use_kv_cache {
+                self.decode_with_cache(
                     batch_size,
-                    self.config.max_output_len,
-                    step - 1,
-                )?;
-                for row in 0..batch_size {
-                    let idx = row * self.config.max_output_len + step;
-                    let token = if finished[row] { eos_token_id } else { next_tokens[row] };
-                    generated[idx] = token;
-                    if token == eos_token_id {
-                        finished[row] = true;
-                    }
-                }
-                if finished.iter().take(batch_words.len()).all(|done| *done) {
-                    break;
-                }
-            }
+                    batch_words.len(),
+                    pad_token_id,
+                    encoder_states,
+                    encoder_mask,
+                )?
+            } else {
+                self.decode_without_cache(
+                    batch_size,
+                    batch_words.len(),
+                    pad_token_id,
+                    encoder_states,
+                    encoder_mask,
+                )?
+            };
 
             for row in 0..batch_words.len() {
                 let start = row * self.config.max_output_len;
@@ -159,6 +160,114 @@ impl G2pPipeline {
             }
         }
         Ok(results)
+    }
+
+    fn decode_without_cache(
+        &self,
+        batch_size: usize,
+        real_batch: usize,
+        pad_token_id: i64,
+        encoder_states: tvm_ffi::Tensor,
+        encoder_mask: tvm_ffi::Tensor,
+    ) -> Result<Vec<i64>, PipelineError> {
+        let mut generated = vec![pad_token_id; batch_size * self.config.max_output_len];
+        let eos_token_id = self.config.eos_token_id.ok_or(PipelineError::MissingEosToken)?;
+        let mut finished = vec![false; batch_size];
+        if real_batch < batch_size {
+            for row in real_batch..batch_size {
+                finished[row] = true;
+            }
+        }
+        for step in 1..self.config.max_output_len {
+            let decoder_input = tensor_from_i64(
+                &generated,
+                &[batch_size as i64, self.config.max_output_len as i64],
+            )?;
+            let logits = self.tvm.call_decoder(&decoder_input, &encoder_states, &encoder_mask)?;
+            let next_tokens = argmax_last_token(
+                &logits,
+                batch_size,
+                self.config.max_output_len,
+                step - 1,
+            )?;
+            for row in 0..batch_size {
+                let idx = row * self.config.max_output_len + step;
+                let token = if finished[row] { eos_token_id } else { next_tokens[row] };
+                generated[idx] = token;
+                if token == eos_token_id {
+                    finished[row] = true;
+                }
+            }
+            if finished.iter().take(real_batch).all(|done| *done) {
+                break;
+            }
+        }
+        Ok(generated)
+    }
+
+    fn decode_with_cache(
+        &self,
+        batch_size: usize,
+        real_batch: usize,
+        pad_token_id: i64,
+        encoder_states: tvm_ffi::Tensor,
+        encoder_mask: tvm_ffi::Tensor,
+    ) -> Result<Vec<i64>, PipelineError> {
+        let eos_token_id = self.config.eos_token_id.ok_or(PipelineError::MissingEosToken)?;
+        let mut generated = vec![pad_token_id; batch_size * self.config.max_output_len];
+        let mut finished = vec![false; batch_size];
+        if real_batch < batch_size {
+            for row in real_batch..batch_size {
+                finished[row] = true;
+            }
+        }
+
+        let prefill_ids = vec![pad_token_id; batch_size];
+        let prefill_tensor = tensor_from_i64(&prefill_ids, &[batch_size as i64, 1])?;
+        let (logits, mut past_k, mut past_v, mut cur_pos) =
+            self.tvm
+                .call_decoder_prefill(&prefill_tensor, &encoder_states, &encoder_mask)?;
+        let next_tokens = argmax_last_token(&logits, batch_size, 1, 0)?;
+        for row in 0..batch_size {
+            generated[row * self.config.max_output_len + 1] = next_tokens[row];
+        }
+
+        for step in 2..self.config.max_output_len {
+            for row in 0..batch_size {
+                if generated[row * self.config.max_output_len + step - 1] == eos_token_id {
+                    finished[row] = true;
+                }
+            }
+            if finished.iter().take(real_batch).all(|done| *done) {
+                break;
+            }
+            let mut step_ids = Vec::with_capacity(batch_size);
+            for row in 0..batch_size {
+                step_ids.push(generated[row * self.config.max_output_len + step - 1]);
+            }
+            let step_tensor = tensor_from_i64(&step_ids, &[batch_size as i64, 1])?;
+            let (logits, next_k, next_v, next_pos) = self.tvm.call_decoder_step(
+                &step_tensor,
+                &encoder_states,
+                &encoder_mask,
+                &past_k,
+                &past_v,
+                &cur_pos,
+            )?;
+            past_k = next_k;
+            past_v = next_v;
+            cur_pos = next_pos;
+            let next_tokens = argmax_last_token(&logits, batch_size, 1, 0)?;
+            for row in 0..batch_size {
+                let idx = row * self.config.max_output_len + step;
+                let token = if finished[row] { eos_token_id } else { next_tokens[row] };
+                generated[idx] = token;
+                if token == eos_token_id {
+                    finished[row] = true;
+                }
+            }
+        }
+        Ok(generated)
     }
 }
 

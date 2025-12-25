@@ -9,6 +9,7 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
   - Tokenize with ByT5 tokenizer (google/byt5-small)
   - Run TVM-compiled encoder/decoder (or prefill/step for KV-cache)
   - Greedy decode and return phoneme strings
+  - KV-cache path uses decoder_prefill/decoder_step outputs (logits, past_k, past_v, cur_pos) to step tokens one at a time
 - Target Flutter (iOS + Android) via FRB.
 - Reuse compiled artifacts from `python/src/charsiug2p_tvm/tvm_compile.py`.
 

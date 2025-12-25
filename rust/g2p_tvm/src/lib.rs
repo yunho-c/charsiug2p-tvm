@@ -17,6 +17,10 @@ pub enum TvmError {
     MissingVmLoader { module: PathBuf },
     MissingVmInitialization { module: PathBuf },
     MissingVmEntry { module: PathBuf, name: String },
+    MissingKvArtifacts {
+        decoder_prefill: Option<PathBuf>,
+        decoder_step: Option<PathBuf>,
+    },
     UnexpectedOutputType(i32),
     Ffi(tvm_ffi::Error),
 }
@@ -44,6 +48,14 @@ impl fmt::Display for TvmError {
                 f,
                 "Function '{name}' not found in Relax VM executable for module {}. Check the entry name (often 'main').",
                 module.display()
+            ),
+            TvmError::MissingKvArtifacts {
+                decoder_prefill,
+                decoder_step,
+            } => write!(
+                f,
+                "KV-cache artifacts are incomplete. decoder_prefill={:?}, decoder_step={:?}",
+                decoder_prefill, decoder_step
             ),
             TvmError::UnexpectedOutputType(type_index) => {
                 write!(f, "Unexpected output type index: {type_index}")
@@ -172,6 +184,8 @@ impl TvmModule {
 pub struct TvmExecutable {
     encoder: LoadedModule,
     decoder: LoadedModule,
+    decoder_prefill: Option<LoadedModule>,
+    decoder_step: Option<LoadedModule>,
 }
 
 impl TvmExecutable {
@@ -180,9 +194,24 @@ impl TvmExecutable {
         let vm_config = VmConfig::cpu();
         let encoder = TvmModule::load(&artifacts.encoder)?.load_entry(MAIN_FUNCTION, vm_config)?;
         let decoder = TvmModule::load(&artifacts.decoder)?.load_entry(MAIN_FUNCTION, vm_config)?;
+        let (decoder_prefill, decoder_step) = match (&artifacts.decoder_prefill, &artifacts.decoder_step) {
+            (Some(prefill_path), Some(step_path)) => (
+                Some(TvmModule::load(prefill_path)?.load_entry(MAIN_FUNCTION, vm_config)?),
+                Some(TvmModule::load(step_path)?.load_entry(MAIN_FUNCTION, vm_config)?),
+            ),
+            (None, None) => (None, None),
+            _ => {
+                return Err(TvmError::MissingKvArtifacts {
+                    decoder_prefill: artifacts.decoder_prefill.clone(),
+                    decoder_step: artifacts.decoder_step.clone(),
+                })
+            }
+        };
         Ok(Self {
             encoder,
             decoder,
+            decoder_prefill,
+            decoder_step,
         })
     }
 
@@ -192,6 +221,10 @@ impl TvmExecutable {
 
     pub fn decoder_main(&self) -> &Function {
         &self.decoder.entry
+    }
+
+    pub fn has_kv_cache(&self) -> bool {
+        self.decoder_prefill.is_some() && self.decoder_step.is_some()
     }
 
     pub fn call_encoder(&self, input_ids: &Tensor, attention_mask: &Tensor) -> Result<Tensor, TvmError> {
@@ -211,6 +244,62 @@ impl TvmExecutable {
             AnyView::from(encoder_attention_mask),
         ];
         self.call_tensor(&self.decoder.entry, &args)
+    }
+
+    pub fn call_decoder_prefill(
+        &self,
+        decoder_input_ids: &Tensor,
+        encoder_hidden_states: &Tensor,
+        encoder_attention_mask: &Tensor,
+    ) -> Result<(Tensor, Tensor, Tensor, Tensor), TvmError> {
+        let module = self.decoder_prefill.as_ref().ok_or(TvmError::MissingKvArtifacts {
+            decoder_prefill: None,
+            decoder_step: None,
+        })?;
+        let args = [
+            AnyView::from(decoder_input_ids),
+            AnyView::from(encoder_hidden_states),
+            AnyView::from(encoder_attention_mask),
+        ];
+        let output = module.entry.call_packed(&args)?;
+        let tensors = extract_tensor_array(&output, 4)?;
+        let mut iter = tensors.into_iter();
+        let logits = iter.next().expect("logits");
+        let past_k = iter.next().expect("past_k");
+        let past_v = iter.next().expect("past_v");
+        let cur_pos = iter.next().expect("cur_pos");
+        Ok((logits, past_k, past_v, cur_pos))
+    }
+
+    pub fn call_decoder_step(
+        &self,
+        decoder_input_ids: &Tensor,
+        encoder_hidden_states: &Tensor,
+        encoder_attention_mask: &Tensor,
+        past_k: &Tensor,
+        past_v: &Tensor,
+        cur_pos: &Tensor,
+    ) -> Result<(Tensor, Tensor, Tensor, Tensor), TvmError> {
+        let module = self.decoder_step.as_ref().ok_or(TvmError::MissingKvArtifacts {
+            decoder_prefill: None,
+            decoder_step: None,
+        })?;
+        let args = [
+            AnyView::from(decoder_input_ids),
+            AnyView::from(encoder_hidden_states),
+            AnyView::from(encoder_attention_mask),
+            AnyView::from(past_k),
+            AnyView::from(past_v),
+            AnyView::from(cur_pos),
+        ];
+        let output = module.entry.call_packed(&args)?;
+        let tensors = extract_tensor_array(&output, 4)?;
+        let mut iter = tensors.into_iter();
+        let logits = iter.next().expect("logits");
+        let next_k = iter.next().expect("next_k");
+        let next_v = iter.next().expect("next_v");
+        let next_pos = iter.next().expect("next_pos");
+        Ok((logits, next_k, next_v, next_pos))
     }
 
     fn call_tensor(&self, function: &Function, args: &[AnyView<'_>]) -> Result<Tensor, TvmError> {
@@ -270,6 +359,27 @@ fn extract_tensor_from_output(output: &tvm_ffi::Any, index: usize) -> Result<Ten
         return element.try_as::<Tensor>().ok_or(TvmError::UnexpectedOutputType(element.type_index()));
     }
     Err(TvmError::UnexpectedOutputType(output.type_index()))
+}
+
+fn extract_tensor_array(output: &tvm_ffi::Any, expected: usize) -> Result<Vec<Tensor>, TvmError> {
+    if expected == 1 {
+        return Ok(vec![extract_tensor_from_output(output, 0)?]);
+    }
+    if output.type_index() != tvm_ffi::TypeIndex::kTVMFFIArray as i32 {
+        return Err(TvmError::UnexpectedOutputType(output.type_index()));
+    }
+    let array_get_item = Function::get_global("ffi.ArrayGetItem")?;
+    let mut tensors = Vec::with_capacity(expected);
+    for index in 0..expected {
+        let index_val = index as i64;
+        let args = [AnyView::from(output), AnyView::from(&index_val)];
+        let element = array_get_item.call_packed(&args)?;
+        let tensor = element
+            .try_as::<Tensor>()
+            .ok_or(TvmError::UnexpectedOutputType(element.type_index()))?;
+        tensors.push(tensor);
+    }
+    Ok(tensors)
 }
 
 pub fn tensor_from_i64(data: &[i64], shape: &[i64]) -> Result<Tensor, TvmError> {
