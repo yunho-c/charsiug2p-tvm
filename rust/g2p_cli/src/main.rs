@@ -73,8 +73,8 @@ struct Args {
         help = "Enable KV-cache artifacts (use --kv-cache=false for cacheless decode)"
     )]
     kv_cache: bool,
-    #[arg(long, default_value = "cpu", help = "Device (cpu, cuda, metal, vulkan, opencl, webgpu, rocm)")]
-    device: String,
+    #[arg(long, help = "Device (cpu, cuda, metal, vulkan, opencl, webgpu, rocm)")]
+    device: Option<String>,
     #[arg(long, default_value_t = 0, help = "Device id")]
     device_id: i32,
     #[arg(long, default_value_t = false, help = "Insert a space after the language prefix")]
@@ -95,7 +95,11 @@ fn main() {
         max_output_len: args.max_output_len,
         space_after_colon: args.space_after_colon,
     };
-    let device = match DeviceConfig::from_str(&args.device, args.device_id) {
+    let resolved_device = args
+        .device
+        .clone()
+        .unwrap_or_else(|| default_device_for_target(&args.tvm_target).to_string());
+    let device = match DeviceConfig::from_str(&resolved_device, args.device_id) {
         Ok(device) => device,
         Err(err) => {
             eprintln!("Invalid device: {err}");
@@ -259,5 +263,17 @@ fn resolve_cache_paths(artifacts: &TvmArtifacts, args: &Args) -> Result<(PathBuf
             prefill.display(),
             step.display()
         ))
+    }
+}
+
+fn default_device_for_target(target: &str) -> &'static str {
+    match target {
+        "metal" | "metal-macos" | "metal-ios" => "metal",
+        "cuda" => "cuda",
+        "rocm" => "rocm",
+        "vulkan" => "vulkan",
+        "opencl" => "opencl",
+        "webgpu" => "webgpu",
+        _ => "cpu",
     }
 }
