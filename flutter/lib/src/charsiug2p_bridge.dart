@@ -1,4 +1,5 @@
 import 'api.dart';
+import 'external_library.dart';
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
@@ -8,7 +9,8 @@ class CharsiuG2p {
   CharsiuG2p._(this._model);
 
   static Future<void> init({ExternalLibrary? externalLibrary}) async {
-    await G2pBridge.init(externalLibrary: externalLibrary);
+    final resolved = externalLibrary ?? defaultExternalLibrary();
+    await G2pBridge.init(externalLibrary: resolved);
   }
 
   static Future<CharsiuG2p> load({

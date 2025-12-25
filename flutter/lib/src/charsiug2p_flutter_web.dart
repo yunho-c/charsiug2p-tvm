@@ -23,7 +23,8 @@ class CharsiuG2pFlutterWeb {
       default:
         throw PlatformException(
           code: 'Unimplemented',
-          message: 'charsiug2p_flutter/paths: ${call.method} not implemented on web',
+          message:
+              'charsiug2p_flutter/paths: ${call.method} not implemented on web',
         );
     }
   }

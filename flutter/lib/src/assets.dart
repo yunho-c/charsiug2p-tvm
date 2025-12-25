@@ -26,7 +26,8 @@ class CharsiuG2pAssets {
         .map((prefix) => _normalizeSubdir(prefix))
         .toList(growable: false);
     final manifest = await rootBundle.loadString('AssetManifest.json');
-    final Map<String, dynamic> entries = jsonDecode(manifest) as Map<String, dynamic>;
+    final Map<String, dynamic> entries =
+        jsonDecode(manifest) as Map<String, dynamic>;
     final assetKeys = entries.keys
         .where((key) => key.startsWith(normalizedPrefix))
         .where((key) => !_isSkipped(normalizedPrefix, key, normalizedSkips))
@@ -77,7 +78,8 @@ class CharsiuG2pAssets {
     return trimmed.endsWith('/') ? trimmed : '$trimmed/';
   }
 
-  static bool _isSkipped(String basePrefix, String key, List<String> skipPrefixes) {
+  static bool _isSkipped(
+      String basePrefix, String key, List<String> skipPrefixes) {
     final relative = key.substring(basePrefix.length);
     for (final skip in skipPrefixes) {
       if (relative.startsWith(skip)) {

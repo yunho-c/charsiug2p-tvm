@@ -36,8 +36,12 @@ class G2pBridge
 
   /// Initialize flutter_rust_bridge in mock mode.
   /// No libraries for FFI are loaded.
-  static void initMock({required G2pBridgeApi api}) {
-    instance.initMockImpl(api: api);
+  static void initMock({
+    required G2pBridgeApi api,
+  }) {
+    instance.initMockImpl(
+      api: api,
+    );
   }
 
   /// Dispose flutter_rust_bridge
@@ -69,10 +73,10 @@ class G2pBridge
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
-        stem: 'charsiug2p_g2p_ffi',
-        ioDirectory: '../rust/g2p_ffi/target/release/',
-        webPrefix: 'pkg/',
-      );
+    stem: 'charsiug2p_g2p_ffi',
+    ioDirectory: 'rust/target/release/',
+    webPrefix: 'pkg/',
+  );
 }
 
 abstract class G2pBridgeApi extends BaseApi {
@@ -80,12 +84,11 @@ abstract class G2pBridgeApi extends BaseApi {
 
   Future<G2PModel> crateApiG2PModelNew({required G2pModelConfig config});
 
-  Future<List<String>> crateApiG2PModelRun({
-    required G2PModel model,
-    required List<String> words,
-    required String lang,
-    G2pRunOptions? options,
-  });
+  Future<List<String>> crateApiG2PModelRun(
+      {required G2PModel model,
+      required List<String> words,
+      required String lang,
+      G2pRunOptions? options});
 
   Future<G2pPlatformDefaults> crateApiG2PPlatformDefaults();
 
@@ -94,10 +97,10 @@ abstract class G2pBridgeApi extends BaseApi {
   Future<G2pRunOptions> crateApiG2PRunOptionsDefault();
 
   RustArcIncrementStrongCountFnType
-  get rust_arc_increment_strong_count_G2PModel;
+      get rust_arc_increment_strong_count_G2PModel;
 
   RustArcDecrementStrongCountFnType
-  get rust_arc_decrement_strong_count_G2PModel;
+      get rust_arc_decrement_strong_count_G2PModel;
 
   CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_G2PModelPtr;
 }
@@ -113,150 +116,124 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 
   @override
   Future<G2pModelConfig> crateApiG2PDefaultConfig() {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 1,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_g_2_p_model_config,
-          decodeErrorData: null,
-        ),
-        constMeta: kCrateApiG2PDefaultConfigConstMeta,
-        argValues: [],
-        apiImpl: this,
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 1, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_g_2_p_model_config,
+        decodeErrorData: null,
       ),
-    );
+      constMeta: kCrateApiG2PDefaultConfigConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
   }
 
-  TaskConstMeta get kCrateApiG2PDefaultConfigConstMeta =>
-      const TaskConstMeta(debugName: "g2p_default_config", argNames: []);
+  TaskConstMeta get kCrateApiG2PDefaultConfigConstMeta => const TaskConstMeta(
+        debugName: "g2p_default_config",
+        argNames: [],
+      );
 
   @override
   Future<G2PModel> crateApiG2PModelNew({required G2pModelConfig config}) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_box_autoadd_g_2_p_model_config(config, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 2,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel,
-          decodeErrorData: sse_decode_g_2_p_ffi_error,
-        ),
-        constMeta: kCrateApiG2PModelNewConstMeta,
-        argValues: [config],
-        apiImpl: this,
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_box_autoadd_g_2_p_model_config(config, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 2, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData:
+            sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel,
+        decodeErrorData: sse_decode_g_2_p_ffi_error,
       ),
-    );
+      constMeta: kCrateApiG2PModelNewConstMeta,
+      argValues: [config],
+      apiImpl: this,
+    ));
   }
 
-  TaskConstMeta get kCrateApiG2PModelNewConstMeta =>
-      const TaskConstMeta(debugName: "g2p_model_new", argNames: ["config"]);
+  TaskConstMeta get kCrateApiG2PModelNewConstMeta => const TaskConstMeta(
+        debugName: "g2p_model_new",
+        argNames: ["config"],
+      );
 
   @override
-  Future<List<String>> crateApiG2PModelRun({
-    required G2PModel model,
-    required List<String> words,
-    required String lang,
-    G2pRunOptions? options,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-            model,
-            serializer,
-          );
-          sse_encode_list_String(words, serializer);
-          sse_encode_String(lang, serializer);
-          sse_encode_opt_box_autoadd_g_2_p_run_options(options, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 3,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_list_String,
-          decodeErrorData: sse_decode_g_2_p_ffi_error,
-        ),
-        constMeta: kCrateApiG2PModelRunConstMeta,
-        argValues: [model, words, lang, options],
-        apiImpl: this,
+  Future<List<String>> crateApiG2PModelRun(
+      {required G2PModel model,
+      required List<String> words,
+      required String lang,
+      G2pRunOptions? options}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+            model, serializer);
+        sse_encode_list_String(words, serializer);
+        sse_encode_String(lang, serializer);
+        sse_encode_opt_box_autoadd_g_2_p_run_options(options, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 3, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_String,
+        decodeErrorData: sse_decode_g_2_p_ffi_error,
       ),
-    );
+      constMeta: kCrateApiG2PModelRunConstMeta,
+      argValues: [model, words, lang, options],
+      apiImpl: this,
+    ));
   }
 
   TaskConstMeta get kCrateApiG2PModelRunConstMeta => const TaskConstMeta(
-    debugName: "g2p_model_run",
-    argNames: ["model", "words", "lang", "options"],
-  );
+        debugName: "g2p_model_run",
+        argNames: ["model", "words", "lang", "options"],
+      );
 
   @override
   Future<G2pPlatformDefaults> crateApiG2PPlatformDefaults() {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 4,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_g_2_p_platform_defaults,
-          decodeErrorData: null,
-        ),
-        constMeta: kCrateApiG2PPlatformDefaultsConstMeta,
-        argValues: [],
-        apiImpl: this,
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 4, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_g_2_p_platform_defaults,
+        decodeErrorData: null,
       ),
-    );
+      constMeta: kCrateApiG2PPlatformDefaultsConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
   }
 
   TaskConstMeta get kCrateApiG2PPlatformDefaultsConstMeta =>
-      const TaskConstMeta(debugName: "g2p_platform_defaults", argNames: []);
+      const TaskConstMeta(
+        debugName: "g2p_platform_defaults",
+        argNames: [],
+      );
 
   @override
   Future<G2pModelConfig> crateApiG2PModelConfigDefault() {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 5,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_g_2_p_model_config,
-          decodeErrorData: null,
-        ),
-        constMeta: kCrateApiG2PModelConfigDefaultConstMeta,
-        argValues: [],
-        apiImpl: this,
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 5, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_g_2_p_model_config,
+        decodeErrorData: null,
       ),
-    );
+      constMeta: kCrateApiG2PModelConfigDefaultConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
   }
 
   TaskConstMeta get kCrateApiG2PModelConfigDefaultConstMeta =>
@@ -267,62 +244,56 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 
   @override
   Future<G2pRunOptions> crateApiG2PRunOptionsDefault() {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 6,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_g_2_p_run_options,
-          decodeErrorData: null,
-        ),
-        constMeta: kCrateApiG2PRunOptionsDefaultConstMeta,
-        argValues: [],
-        apiImpl: this,
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 6, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_g_2_p_run_options,
+        decodeErrorData: null,
       ),
-    );
+      constMeta: kCrateApiG2PRunOptionsDefaultConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
   }
 
   TaskConstMeta get kCrateApiG2PRunOptionsDefaultConstMeta =>
-      const TaskConstMeta(debugName: "g_2_p_run_options_default", argNames: []);
+      const TaskConstMeta(
+        debugName: "g_2_p_run_options_default",
+        argNames: [],
+      );
 
   RustArcIncrementStrongCountFnType
-  get rust_arc_increment_strong_count_G2PModel => wire
-      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel;
+      get rust_arc_increment_strong_count_G2PModel => wire
+          .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel;
 
   RustArcDecrementStrongCountFnType
-  get rust_arc_decrement_strong_count_G2PModel => wire
-      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel;
+      get rust_arc_decrement_strong_count_G2PModel => wire
+          .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel;
 
   @protected
   G2PModel
-  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    dynamic raw,
-  ) {
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return G2PModelImpl.frbInternalDcoDecode(raw as List<dynamic>);
   }
 
   @protected
   G2PModel
-  dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    dynamic raw,
-  ) {
+      dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return G2PModelImpl.frbInternalDcoDecode(raw as List<dynamic>);
   }
 
   @protected
   G2PModel
-  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    dynamic raw,
-  ) {
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return G2PModelImpl.frbInternalDcoDecode(raw as List<dynamic>);
   }
@@ -410,7 +381,9 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
     final arr = raw as List<dynamic>;
     if (arr.length != 1)
       throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return G2pRunOptions(spaceAfterColon: dco_decode_bool(arr[0]));
+    return G2pRunOptions(
+      spaceAfterColon: dco_decode_bool(arr[0]),
+    );
   }
 
   @protected
@@ -469,38 +442,29 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 
   @protected
   G2PModel
-  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    SseDeserializer deserializer,
-  ) {
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return G2PModelImpl.frbInternalSseDecode(
-      sse_decode_usize(deserializer),
-      sse_decode_i_32(deserializer),
-    );
+        sse_decode_usize(deserializer), sse_decode_i_32(deserializer));
   }
 
   @protected
   G2PModel
-  sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    SseDeserializer deserializer,
-  ) {
+      sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return G2PModelImpl.frbInternalSseDecode(
-      sse_decode_usize(deserializer),
-      sse_decode_i_32(deserializer),
-    );
+        sse_decode_usize(deserializer), sse_decode_i_32(deserializer));
   }
 
   @protected
   G2PModel
-  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    SseDeserializer deserializer,
-  ) {
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return G2PModelImpl.frbInternalSseDecode(
-      sse_decode_usize(deserializer),
-      sse_decode_i_32(deserializer),
-    );
+        sse_decode_usize(deserializer), sse_decode_i_32(deserializer));
   }
 
   @protected
@@ -518,16 +482,14 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 
   @protected
   G2pModelConfig sse_decode_box_autoadd_g_2_p_model_config(
-    SseDeserializer deserializer,
-  ) {
+      SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_g_2_p_model_config(deserializer));
   }
 
   @protected
   G2pRunOptions sse_decode_box_autoadd_g_2_p_run_options(
-    SseDeserializer deserializer,
-  ) {
+      SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_g_2_p_run_options(deserializer));
   }
@@ -546,10 +508,7 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
     var var_message = sse_decode_String(deserializer);
     var var_details = sse_decode_opt_String(deserializer);
     return G2pFfiError(
-      kind: var_kind,
-      message: var_message,
-      details: var_details,
-    );
+        kind: var_kind, message: var_message, details: var_details);
   }
 
   @protected
@@ -568,25 +527,23 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
     var var_tokenizerRoot = sse_decode_opt_String(deserializer);
     var var_tvmRoot = sse_decode_opt_String(deserializer);
     return G2pModelConfig(
-      assetRoot: var_assetRoot,
-      checkpoint: var_checkpoint,
-      target: var_target,
-      maxInputBytes: var_maxInputBytes,
-      maxOutputLen: var_maxOutputLen,
-      batchSize: var_batchSize,
-      tvmExt: var_tvmExt,
-      useKvCache: var_useKvCache,
-      device: var_device,
-      deviceId: var_deviceId,
-      tokenizerRoot: var_tokenizerRoot,
-      tvmRoot: var_tvmRoot,
-    );
+        assetRoot: var_assetRoot,
+        checkpoint: var_checkpoint,
+        target: var_target,
+        maxInputBytes: var_maxInputBytes,
+        maxOutputLen: var_maxOutputLen,
+        batchSize: var_batchSize,
+        tvmExt: var_tvmExt,
+        useKvCache: var_useKvCache,
+        device: var_device,
+        deviceId: var_deviceId,
+        tokenizerRoot: var_tokenizerRoot,
+        tvmRoot: var_tvmRoot);
   }
 
   @protected
   G2pPlatformDefaults sse_decode_g_2_p_platform_defaults(
-    SseDeserializer deserializer,
-  ) {
+      SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_target = sse_decode_String(deserializer);
     var var_device = sse_decode_String(deserializer);
@@ -638,8 +595,7 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 
   @protected
   G2pRunOptions? sse_decode_opt_box_autoadd_g_2_p_run_options(
-    SseDeserializer deserializer,
-  ) {
+      SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
     if (sse_decode_bool(deserializer)) {
@@ -674,41 +630,29 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 
   @protected
   void
-  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    G2PModel self,
-    SseSerializer serializer,
-  ) {
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          G2PModel self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_usize(
-      (self as G2PModelImpl).frbInternalSseEncode(move: true),
-      serializer,
-    );
+        (self as G2PModelImpl).frbInternalSseEncode(move: true), serializer);
   }
 
   @protected
   void
-  sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    G2PModel self,
-    SseSerializer serializer,
-  ) {
+      sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          G2PModel self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_usize(
-      (self as G2PModelImpl).frbInternalSseEncode(move: false),
-      serializer,
-    );
+        (self as G2PModelImpl).frbInternalSseEncode(move: false), serializer);
   }
 
   @protected
   void
-  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    G2PModel self,
-    SseSerializer serializer,
-  ) {
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          G2PModel self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_usize(
-      (self as G2PModelImpl).frbInternalSseEncode(move: null),
-      serializer,
-    );
+        (self as G2PModelImpl).frbInternalSseEncode(move: null), serializer);
   }
 
   @protected
@@ -725,27 +669,21 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 
   @protected
   void sse_encode_box_autoadd_g_2_p_model_config(
-    G2pModelConfig self,
-    SseSerializer serializer,
-  ) {
+      G2pModelConfig self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_g_2_p_model_config(self, serializer);
   }
 
   @protected
   void sse_encode_box_autoadd_g_2_p_run_options(
-    G2pRunOptions self,
-    SseSerializer serializer,
-  ) {
+      G2pRunOptions self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_g_2_p_run_options(self, serializer);
   }
 
   @protected
   void sse_encode_g_2_p_error_kind(
-    G2pErrorKind self,
-    SseSerializer serializer,
-  ) {
+      G2pErrorKind self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.index, serializer);
   }
@@ -760,9 +698,7 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 
   @protected
   void sse_encode_g_2_p_model_config(
-    G2pModelConfig self,
-    SseSerializer serializer,
-  ) {
+      G2pModelConfig self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.assetRoot, serializer);
     sse_encode_String(self.checkpoint, serializer);
@@ -780,9 +716,7 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 
   @protected
   void sse_encode_g_2_p_platform_defaults(
-    G2pPlatformDefaults self,
-    SseSerializer serializer,
-  ) {
+      G2pPlatformDefaults self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.target, serializer);
     sse_encode_String(self.device, serializer);
@@ -790,9 +724,7 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 
   @protected
   void sse_encode_g_2_p_run_options(
-    G2pRunOptions self,
-    SseSerializer serializer,
-  ) {
+      G2pRunOptions self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bool(self.spaceAfterColon, serializer);
   }
@@ -814,9 +746,7 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 
   @protected
   void sse_encode_list_prim_u_8_strict(
-    Uint8List self,
-    SseSerializer serializer,
-  ) {
+      Uint8List self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putUint8List(self);
@@ -834,9 +764,7 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 
   @protected
   void sse_encode_opt_box_autoadd_g_2_p_run_options(
-    G2pRunOptions? self,
-    SseSerializer serializer,
-  ) {
+      G2pRunOptions? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
     sse_encode_bool(self != null, serializer);
@@ -873,11 +801,11 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
 class G2PModelImpl extends RustOpaque implements G2PModel {
   // Not to be used by end users
   G2PModelImpl.frbInternalDcoDecode(List<dynamic> wire)
-    : super.frbInternalDcoDecode(wire, _kStaticData);
+      : super.frbInternalDcoDecode(wire, _kStaticData);
 
   // Not to be used by end users
   G2PModelImpl.frbInternalSseDecode(BigInt ptr, int externalSizeOnNative)
-    : super.frbInternalSseDecode(ptr, externalSizeOnNative, _kStaticData);
+      : super.frbInternalSseDecode(ptr, externalSizeOnNative, _kStaticData);
 
   static final _kStaticData = RustArcStaticData(
     rustArcIncrementStrongCount:

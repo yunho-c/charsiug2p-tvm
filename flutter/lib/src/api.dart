@@ -18,17 +18,13 @@ Future<G2pModelConfig> g2PDefaultConfig() =>
 Future<G2PModel> g2PModelNew({required G2pModelConfig config}) =>
     G2pBridge.instance.api.crateApiG2PModelNew(config: config);
 
-Future<List<String>> g2PModelRun({
-  required G2PModel model,
-  required List<String> words,
-  required String lang,
-  G2pRunOptions? options,
-}) => G2pBridge.instance.api.crateApiG2PModelRun(
-  model: model,
-  words: words,
-  lang: lang,
-  options: options,
-);
+Future<List<String>> g2PModelRun(
+        {required G2PModel model,
+        required List<String> words,
+        required String lang,
+        G2pRunOptions? options}) =>
+    G2pBridge.instance.api.crateApiG2PModelRun(
+        model: model, words: words, lang: lang, options: options);
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<G2pModel>>
 abstract class G2PModel implements RustOpaqueInterface {}
@@ -41,6 +37,7 @@ enum G2pErrorKind {
   device,
   inference,
   unknown,
+  ;
 }
 
 class G2pFfiError implements FrbException {
@@ -48,7 +45,11 @@ class G2pFfiError implements FrbException {
   final String message;
   final String? details;
 
-  const G2pFfiError({required this.kind, required this.message, this.details});
+  const G2pFfiError({
+    required this.kind,
+    required this.message,
+    this.details,
+  });
 
   @override
   int get hashCode => kind.hashCode ^ message.hashCode ^ details.hashCode;
@@ -133,7 +134,10 @@ class G2pPlatformDefaults {
   final String target;
   final String device;
 
-  const G2pPlatformDefaults({required this.target, required this.device});
+  const G2pPlatformDefaults({
+    required this.target,
+    required this.device,
+  });
 
   @override
   int get hashCode => target.hashCode ^ device.hashCode;
@@ -150,7 +154,9 @@ class G2pPlatformDefaults {
 class G2pRunOptions {
   final bool spaceAfterColon;
 
-  const G2pRunOptions({required this.spaceAfterColon});
+  const G2pRunOptions({
+    required this.spaceAfterColon,
+  });
 
   static Future<G2pRunOptions> default_() =>
       G2pBridge.instance.api.crateApiG2PRunOptionsDefault();

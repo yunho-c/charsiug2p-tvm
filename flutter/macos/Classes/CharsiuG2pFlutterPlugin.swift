@@ -11,8 +11,8 @@ public class CharsiuG2pFlutterPlugin: NSObject, FlutterPlugin {
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "get_paths":
-      let resourceDir = Bundle.main.resourcePath
-      let nativeLibraryDir = Bundle.main.privateFrameworksPath
+      let resourceDir: Any? = Bundle.main.resourcePath
+      let nativeLibraryDir: Any? = Bundle.main.privateFrameworksPath
       result([
         "resourceDir": resourceDir ?? NSNull(),
         "nativeLibraryDir": nativeLibraryDir ?? NSNull(),

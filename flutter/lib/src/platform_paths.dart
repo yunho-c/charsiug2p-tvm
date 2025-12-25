@@ -13,7 +13,8 @@ class CharsiuG2pPlatformPaths {
 class CharsiuG2pPlatformChannels {
   CharsiuG2pPlatformChannels._();
 
-  static const MethodChannel _channel = MethodChannel('charsiug2p_flutter/paths');
+  static const MethodChannel _channel =
+      MethodChannel('charsiug2p_flutter/paths');
 
   static Future<CharsiuG2pPlatformPaths> getPaths() async {
     final Map<dynamic, dynamic>? raw = await _channel.invokeMethod('get_paths');

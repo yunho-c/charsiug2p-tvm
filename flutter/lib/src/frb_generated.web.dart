@@ -20,27 +20,23 @@ abstract class G2pBridgeApiImplPlatform extends BaseApiImpl<G2pBridgeWire> {
     required super.portManager,
   });
 
-  CrossPlatformFinalizerArg
-  get rust_arc_decrement_strong_count_G2PModelPtr => wire
+  CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_G2PModelPtr => wire
       .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel;
 
   @protected
   G2PModel
-  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    dynamic raw,
-  );
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          dynamic raw);
 
   @protected
   G2PModel
-  dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    dynamic raw,
-  );
+      dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          dynamic raw);
 
   @protected
   G2PModel
-  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    dynamic raw,
-  );
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          dynamic raw);
 
   @protected
   String dco_decode_String(dynamic raw);
@@ -98,21 +94,18 @@ abstract class G2pBridgeApiImplPlatform extends BaseApiImpl<G2pBridgeWire> {
 
   @protected
   G2PModel
-  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    SseDeserializer deserializer,
-  );
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          SseDeserializer deserializer);
 
   @protected
   G2PModel
-  sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    SseDeserializer deserializer,
-  );
+      sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          SseDeserializer deserializer);
 
   @protected
   G2PModel
-  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    SseDeserializer deserializer,
-  );
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          SseDeserializer deserializer);
 
   @protected
   String sse_decode_String(SseDeserializer deserializer);
@@ -122,13 +115,11 @@ abstract class G2pBridgeApiImplPlatform extends BaseApiImpl<G2pBridgeWire> {
 
   @protected
   G2pModelConfig sse_decode_box_autoadd_g_2_p_model_config(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   G2pRunOptions sse_decode_box_autoadd_g_2_p_run_options(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   G2pErrorKind sse_decode_g_2_p_error_kind(SseDeserializer deserializer);
@@ -141,8 +132,7 @@ abstract class G2pBridgeApiImplPlatform extends BaseApiImpl<G2pBridgeWire> {
 
   @protected
   G2pPlatformDefaults sse_decode_g_2_p_platform_defaults(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   G2pRunOptions sse_decode_g_2_p_run_options(SseDeserializer deserializer);
@@ -161,8 +151,7 @@ abstract class G2pBridgeApiImplPlatform extends BaseApiImpl<G2pBridgeWire> {
 
   @protected
   G2pRunOptions? sse_decode_opt_box_autoadd_g_2_p_run_options(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
@@ -178,24 +167,18 @@ abstract class G2pBridgeApiImplPlatform extends BaseApiImpl<G2pBridgeWire> {
 
   @protected
   void
-  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    G2PModel self,
-    SseSerializer serializer,
-  );
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          G2PModel self, SseSerializer serializer);
 
   @protected
   void
-  sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    G2PModel self,
-    SseSerializer serializer,
-  );
+      sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          G2PModel self, SseSerializer serializer);
 
   @protected
   void
-  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    G2PModel self,
-    SseSerializer serializer,
-  );
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          G2PModel self, SseSerializer serializer);
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
@@ -205,15 +188,11 @@ abstract class G2pBridgeApiImplPlatform extends BaseApiImpl<G2pBridgeWire> {
 
   @protected
   void sse_encode_box_autoadd_g_2_p_model_config(
-    G2pModelConfig self,
-    SseSerializer serializer,
-  );
+      G2pModelConfig self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_g_2_p_run_options(
-    G2pRunOptions self,
-    SseSerializer serializer,
-  );
+      G2pRunOptions self, SseSerializer serializer);
 
   @protected
   void sse_encode_g_2_p_error_kind(G2pErrorKind self, SseSerializer serializer);
@@ -223,21 +202,15 @@ abstract class G2pBridgeApiImplPlatform extends BaseApiImpl<G2pBridgeWire> {
 
   @protected
   void sse_encode_g_2_p_model_config(
-    G2pModelConfig self,
-    SseSerializer serializer,
-  );
+      G2pModelConfig self, SseSerializer serializer);
 
   @protected
   void sse_encode_g_2_p_platform_defaults(
-    G2pPlatformDefaults self,
-    SseSerializer serializer,
-  );
+      G2pPlatformDefaults self, SseSerializer serializer);
 
   @protected
   void sse_encode_g_2_p_run_options(
-    G2pRunOptions self,
-    SseSerializer serializer,
-  );
+      G2pRunOptions self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
@@ -247,18 +220,14 @@ abstract class G2pBridgeApiImplPlatform extends BaseApiImpl<G2pBridgeWire> {
 
   @protected
   void sse_encode_list_prim_u_8_strict(
-    Uint8List self,
-    SseSerializer serializer,
-  );
+      Uint8List self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_g_2_p_run_options(
-    G2pRunOptions? self,
-    SseSerializer serializer,
-  );
+      G2pRunOptions? self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);
@@ -278,21 +247,17 @@ abstract class G2pBridgeApiImplPlatform extends BaseApiImpl<G2pBridgeWire> {
 class G2pBridgeWire implements BaseWire {
   G2pBridgeWire.fromExternalLibrary(ExternalLibrary lib);
 
-  void
-  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    int ptr,
-  ) => wasmModule
-      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-        ptr,
-      );
+  void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          int ptr) =>
+      wasmModule
+          .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+              ptr);
 
-  void
-  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    int ptr,
-  ) => wasmModule
-      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-        ptr,
-      );
+  void rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          int ptr) =>
+      wasmModule
+          .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+              ptr);
 }
 
 @JS('wasm_bindgen')
@@ -302,12 +267,10 @@ external G2pBridgeWasmModule get wasmModule;
 @anonymous
 extension type G2pBridgeWasmModule._(JSObject _) implements JSObject {
   external void
-  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    int ptr,
-  );
+      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          int ptr);
 
   external void
-  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
-    int ptr,
-  );
+      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerG2pModel(
+          int ptr);
 }

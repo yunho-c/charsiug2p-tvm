@@ -33,7 +33,7 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
 
 ## FRB API (initial implementation)
 
-- New crate: `rust/g2p_ffi` exposes Flutter Rust Bridge APIs with an opaque `G2pModel`.
+- New crate: `flutter/rust` exposes Flutter Rust Bridge APIs with an opaque `G2pModel`.
 - `G2pModelConfig` fields: `asset_root`, `checkpoint`, `target`, `max_input_bytes`, `max_output_len`, `batch_size`, `tvm_ext`, `use_kv_cache`, `device`, `device_id`, `tokenizer_root`, `tvm_root`.
 - Defaults:
   - `checkpoint=charsiu/g2p_multilingual_byT5_tiny_8_layers_100`
@@ -42,11 +42,13 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
 - Tokenizer is ByT5-only: `g2p_ffi` validates tokenizer metadata (`byt5_offset` or tokenizer name containing `byt5`) and errors otherwise.
 - Errors are structured as `G2pFfiError { kind, message, details }` with `G2pErrorKind` (config, artifact, tokenizer, tvm, device, inference).
 - `g2p_ffi` builds `cdylib` + `staticlib` outputs for Flutter (in addition to the Rust `lib` artifact).
-- FRB API definitions live in `rust/g2p_ffi/src/api.rs`; `rust/g2p_ffi/src/lib.rs` only wires `pub mod api;` and `mod frb_generated;`.
-- Codegen config: `flutter/flutter_rust_bridge.yaml`, outputs `flutter/lib/src/{api.dart,frb_generated*.dart}` and `rust/g2p_ffi/src/frb_generated.rs`.
+- FRB API definitions live in `flutter/rust/src/api.rs`; `flutter/rust/src/lib.rs` only wires `pub mod api;` and `mod frb_generated;`.
+- Codegen config: `flutter/flutter_rust_bridge.yaml`, outputs `flutter/lib/src/{api.dart,frb_generated*.dart}` and `flutter/rust/src/frb_generated.rs`.
 - Codegen command: `flutter_rust_bridge_codegen generate --config-file flutter/flutter_rust_bridge.yaml`.
 - Codegen requires Flutter/Dart tooling plus `tvm-ffi-config` on `PATH` (e.g., `python/.pixi/envs/default/bin`) since it runs `cargo expand` on the Rust crate.
 - Flutter plugin includes a platform channel (`charsiug2p_flutter/paths`) that returns `resourceDir` and `nativeLibraryDir`; desktop returns bundle-relative paths and web returns `null` for both.
+- Rust build integration uses Cargokit (`flutter/cargokit`) with platform-specific hooks (Android Gradle, iOS/macOS podspec script phase, Linux/Windows CMake).
+- Apple builds link Rust as a static library; Dart defaults to `ExternalLibrary.process()` on iOS/macOS to access the symbols.
 
 ## Scaffolding (repo layout)
 
@@ -54,10 +56,10 @@ This plan outlines how to scaffold, implement, and test a Rust-based runtime for
   - `g2p_core/`: core pipeline (prefixing, tokenization, padding, decode loop)
   - `g2p_tvm/`: TVM runtime bindings (tvm-ffi) + Relax VM loader helpers
   - `g2p_pipeline/`: TVM + tokenizer pipeline (cacheless + KV-cache)
-  - `g2p_ffi/`: FRB API layer exposing Rust functions to Flutter (planned)
   - `g2p_cli/`: lightweight CLI for local testing
 - `flutter/` (Flutter app or plugin)
   - `assets/`: tokenizer files + compiled TVM artifacts + manifest
+  - `rust/`: FRB API layer exposing Rust functions to Flutter
   - FRB-generated bindings + build scripts
 
 ## Implementation phases

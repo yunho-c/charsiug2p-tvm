@@ -1,5 +1,5 @@
 [package]
-name = "charsiug2p-g2p-ffi"
+name = "charsiug2p_g2p_ffi"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,10 +8,10 @@ name = "charsiug2p_g2p_ffi"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [dependencies]
-charsiug2p-g2p-core = { path = "../g2p_core" }
-charsiug2p-g2p-pipeline = { path = "../g2p_pipeline" }
-charsiug2p-g2p-tokenizer = { path = "../g2p_tokenizer" }
-charsiug2p-g2p-tvm = { path = "../g2p_tvm" }
+charsiug2p-g2p-core = { path = "../../rust/g2p_core" }
+charsiug2p-g2p-pipeline = { path = "../../rust/g2p_pipeline" }
+charsiug2p-g2p-tokenizer = { path = "../../rust/g2p_tokenizer" }
+charsiug2p-g2p-tvm = { path = "../../rust/g2p_tvm" }
 flutter_rust_bridge = "=2.11.1"
 serde = { version = "1", features = ["derive"] }
 

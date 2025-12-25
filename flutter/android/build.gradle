@@ -35,3 +35,9 @@ android {
         main.java.srcDirs += 'src/main/kotlin'
     }
 }
+
+apply from: "../cargokit/gradle/plugin.gradle"
+cargokit {
+    manifestDir = "../rust"
+    libname = "charsiug2p_g2p_ffi"
+}
