@@ -4,11 +4,19 @@ use std::path::{Path, PathBuf};
 use tvm_ffi::{AnyView, Function, Module, Tensor};
 
 pub const MAIN_FUNCTION: &str = "main";
+const VM_LOAD_FUNCTION: &str = "vm_load_executable";
+const VM_INIT_FUNCTION: &str = "vm_initialization";
+const DL_DEVICE_TYPE_CPU: i32 = 1;
+const DEFAULT_DEVICE_ID: i32 = 0;
+const POOLED_ALLOCATOR: i32 = 2;
 
 #[derive(Debug)]
 pub enum TvmError {
     MissingArtifact(PathBuf),
     MissingFunction { module: PathBuf, name: String },
+    MissingVmLoader { module: PathBuf },
+    MissingVmInitialization { module: PathBuf },
+    MissingVmEntry { module: PathBuf, name: String },
     UnexpectedOutputType(i32),
     Ffi(tvm_ffi::Error),
 }
@@ -19,7 +27,22 @@ impl fmt::Display for TvmError {
             TvmError::MissingArtifact(path) => write!(f, "Missing artifact: {}", path.display()),
             TvmError::MissingFunction { module, name } => write!(
                 f,
-                "Function '{name}' not found in module {}. Relax bytecode modules may require VirtualMachine support from libtvm_runtime.",
+                "Function '{name}' not found in module {}. If this is a Relax VM executable, use vm_load_executable + vm_initialization and fetch '{name}' from the VM module.",
+                module.display()
+            ),
+            TvmError::MissingVmLoader { module } => write!(
+                f,
+                "Relax VM loader '{VM_LOAD_FUNCTION}' not found in module {}.",
+                module.display()
+            ),
+            TvmError::MissingVmInitialization { module } => write!(
+                f,
+                "Relax VM initialization function '{VM_INIT_FUNCTION}' not found in module {}.",
+                module.display()
+            ),
+            TvmError::MissingVmEntry { module, name } => write!(
+                f,
+                "Function '{name}' not found in Relax VM executable for module {}. Check the entry name (often 'main').",
                 module.display()
             ),
             TvmError::UnexpectedOutputType(type_index) => {
@@ -110,41 +133,70 @@ impl TvmModule {
             }
         })
     }
+
+    fn load_entry(self, name: &str, vm_config: VmConfig) -> Result<LoadedModule, TvmError> {
+        if let Ok(function) = self.module.get_function(name) {
+            return Ok(LoadedModule {
+                library: self.module,
+                executable: None,
+                entry: function,
+            });
+        }
+
+        let vm_load = self
+            .module
+            .get_function(VM_LOAD_FUNCTION)
+            .map_err(|_error| TvmError::MissingVmLoader {
+                module: self.path.clone(),
+            })?;
+        let exec_any = vm_load.call_tuple(())?;
+        let exec_module: Module = exec_any.try_into()?;
+        let vm_init = exec_module
+            .get_function(VM_INIT_FUNCTION)
+            .map_err(|_error| TvmError::MissingVmInitialization {
+                module: self.path.clone(),
+            })?;
+        initialize_vm(&vm_init, vm_config)?;
+        let entry = exec_module.get_function(name).map_err(|_error| TvmError::MissingVmEntry {
+            module: self.path.clone(),
+            name: name.to_string(),
+        })?;
+        Ok(LoadedModule {
+            library: self.module,
+            executable: Some(exec_module),
+            entry,
+        })
+    }
 }
 
 pub struct TvmExecutable {
-    encoder: TvmModule,
-    decoder: TvmModule,
-    encoder_main: Function,
-    decoder_main: Function,
+    encoder: LoadedModule,
+    decoder: LoadedModule,
 }
 
 impl TvmExecutable {
     pub fn load(artifacts: &TvmArtifacts) -> Result<Self, TvmError> {
         artifacts.validate()?;
-        let encoder = TvmModule::load(&artifacts.encoder)?;
-        let decoder = TvmModule::load(&artifacts.decoder)?;
-        let encoder_main = encoder.main()?;
-        let decoder_main = decoder.main()?;
+        let vm_config = VmConfig::cpu();
+        let encoder = TvmModule::load(&artifacts.encoder)?.load_entry(MAIN_FUNCTION, vm_config)?;
+        let decoder = TvmModule::load(&artifacts.decoder)?.load_entry(MAIN_FUNCTION, vm_config)?;
         Ok(Self {
             encoder,
             decoder,
-            encoder_main,
-            decoder_main,
         })
     }
 
     pub fn encoder_main(&self) -> &Function {
-        &self.encoder_main
+        &self.encoder.entry
     }
 
     pub fn decoder_main(&self) -> &Function {
-        &self.decoder_main
+        &self.decoder.entry
     }
 
     pub fn call_encoder(&self, input_ids: &Tensor, attention_mask: &Tensor) -> Result<Tensor, TvmError> {
         let args = [AnyView::from(input_ids), AnyView::from(attention_mask)];
-        self.call_tensor(&self.encoder_main, &args)
+        self.call_tensor(&self.encoder.entry, &args)
     }
 
     pub fn call_decoder(
@@ -158,14 +210,52 @@ impl TvmExecutable {
             AnyView::from(encoder_hidden_states),
             AnyView::from(encoder_attention_mask),
         ];
-        self.call_tensor(&self.decoder_main, &args)
+        self.call_tensor(&self.decoder.entry, &args)
     }
 
     fn call_tensor(&self, function: &Function, args: &[AnyView<'_>]) -> Result<Tensor, TvmError> {
-        // NOTE: This assumes the module exports MAIN_FUNCTION directly. Relax bytecode modules may need VM wiring.
         let output = function.call_packed(args)?;
         output.try_as::<Tensor>().ok_or(TvmError::UnexpectedOutputType(output.type_index()))
     }
+}
+
+#[derive(Clone, Copy)]
+struct VmConfig {
+    device_type: i32,
+    device_id: i32,
+}
+
+impl VmConfig {
+    fn cpu() -> Self {
+        Self {
+            device_type: DL_DEVICE_TYPE_CPU,
+            device_id: DEFAULT_DEVICE_ID,
+        }
+    }
+}
+
+struct LoadedModule {
+    #[allow(dead_code)]
+    library: Module,
+    #[allow(dead_code)]
+    executable: Option<Module>,
+    entry: Function,
+}
+
+fn initialize_vm(vm_init: &Function, config: VmConfig) -> Result<(), TvmError> {
+    if config.device_type != DL_DEVICE_TYPE_CPU {
+        vm_init.call_tuple((
+            config.device_type,
+            config.device_id,
+            POOLED_ALLOCATOR,
+            DL_DEVICE_TYPE_CPU,
+            DEFAULT_DEVICE_ID,
+            POOLED_ALLOCATOR,
+        ))?;
+    } else {
+        vm_init.call_tuple((config.device_type, config.device_id, POOLED_ALLOCATOR))?;
+    }
+    Ok(())
 }
 
 pub fn tensor_from_i64(data: &[i64], shape: &[i64]) -> Result<Tensor, TvmError> {
