@@ -1,5 +1,9 @@
 tvm_output/
 
+# Flutter
+pubspec.lock
+Podfile.lock
+
 # Python
 __pycache__/
 *.py[cod]
@@ -11,7 +15,6 @@ develop-eggs/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -89,10 +92,3 @@ $RECYCLE.BIN/
 .Trash-*
 .nfs*
 python/pixi.lock
-
-# Flutter package sources
-!flutter/lib/
-!flutter/lib/**
-!flutter/lib/src/*.io.dart
-!flutter/example/lib/
-!flutter/example/lib/**
