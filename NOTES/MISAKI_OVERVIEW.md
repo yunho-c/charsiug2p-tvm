@@ -31,3 +31,7 @@ The repo now includes `external/misaki` as a git submodule. Misaki is a G2P engi
 
 - `external/misaki/examples/usage.py` demonstrates English usage with inline phoneme overrides.
 - `external/misaki/README.md` documents per-language dependencies and usage patterns.
+
+## Empirical mapping analysis
+
+- CLI: `python -m charsiug2p_tvm analyze-misaki` compares CharsiuG2P IPA (dataset or model) against Misaki's English lexicon using the espeak-style mapping plus optional stress reordering.

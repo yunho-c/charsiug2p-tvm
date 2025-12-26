@@ -24,6 +24,7 @@ from charsiug2p_tvm.tvm_runtime import (
     tvm_g2p_multi,
 )
 from charsiug2p_tvm.eval import evaluate_against_reference, prepare_samples
+from charsiug2p_tvm.misaki_analysis import analyze_misaki_english, write_analysis_csv
 from charsiug2p_tvm.profile import parse_targets, profile_targets, write_profile_csv
 from charsiug2p_tvm.tokenizer_export import default_tokenizer_export_dir, export_tokenizer_assets
 
@@ -642,6 +643,81 @@ def profile_tvm(
 
     write_profile_csv(output_file, results)
     console.print(f"[green]Saved CSV to {output_file}[/green]")
+
+
+@app.command("analyze-misaki")
+def analyze_misaki(
+    lang: str = typer.Option("eng-us", help="Language code for CharsiuG2P inference."),
+    charsiu_path: Path = typer.Option(
+        Path("external/CharsiuG2P/data/train/eng-us.tsv"),
+        "--charsiu-path",
+        help="CharsiuG2P TSV (word\\tipa) to use for candidate words.",
+    ),
+    misaki_root: Path = typer.Option(
+        Path("external/misaki"),
+        "--misaki-root",
+        help="Misaki repository root (expects misaki/data/*_gold.json).",
+    ),
+    british: bool = typer.Option(False, "--british/--american", help="Use GB lexicon/mapping."),
+    source: str = typer.Option(
+        "dataset",
+        help="IPA source: dataset (tsv pronunciations) or model (CharsiuG2P inference).",
+    ),
+    scope: str = typer.Option(
+        "intersection",
+        help="Word scope: intersection (dataset with misaki lexicon) or misaki (lexicon only).",
+    ),
+    limit: int | None = typer.Option(None, help="Limit number of words evaluated."),
+    shuffle: bool = typer.Option(False, help="Shuffle word list before limiting."),
+    seed: int | None = typer.Option(None, help="Shuffle seed."),
+    device: str = typer.Option("cpu", help="Torch device used for source=model."),
+    batch_size: int = typer.Option(8, help="Batch size for source=model inference."),
+    output_csv: Path | None = typer.Option(None, "--output-csv", help="Write per-word results to CSV."),
+) -> None:
+    source = source.lower().strip()
+    scope = scope.lower().strip()
+    if source not in {"dataset", "model"}:
+        raise typer.BadParameter(f"Unsupported source: {source}")
+    if scope not in {"intersection", "misaki"}:
+        raise typer.BadParameter(f"Unsupported scope: {scope}")
+
+    report = analyze_misaki_english(
+        charsiu_path=charsiu_path,
+        misaki_root=misaki_root,
+        lang=lang,
+        british=british,
+        source=source,
+        scope=scope,
+        limit=limit,
+        shuffle=shuffle,
+        seed=seed,
+        device=device,
+        batch_size=batch_size,
+        include_samples=output_csv is not None,
+    )
+
+    console.print(
+        f"[cyan]Dataset words:[/cyan] {report.dataset_words}  "
+        f"[cyan]Misaki lexicon:[/cyan] {report.lexicon_words}  "
+        f"[cyan]Evaluated:[/cyan] {report.total}"
+    )
+    table = Table(title="CharsiuG2P -> Misaki (English)", show_header=True, header_style="bold")
+    table.add_column("Variant", style="cyan")
+    table.add_column("Exact match", style="white", justify="right")
+    table.add_column("CER", style="white", justify="right")
+    for metric in report.metrics:
+        table.add_row(
+            metric.name,
+            f"{metric.exact_match} ({metric.exact_match_rate:.2%})",
+            f"{metric.cer:.4f}",
+        )
+    console.print(table)
+
+    if output_csv is not None:
+        if report.samples is None:
+            raise typer.BadParameter("No samples available to write.")
+        write_analysis_csv(output_csv, report.samples)
+        console.print(f"[green]Saved CSV to {output_csv}[/green]")
 
 
 def cli() -> None:
