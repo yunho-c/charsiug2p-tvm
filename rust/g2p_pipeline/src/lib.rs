@@ -9,6 +9,8 @@ use charsiug2p_g2p_tvm::{
 
 mod artifacts;
 pub use artifacts::{ArtifactError, ArtifactResolver, ArtifactRoots, ArtifactSpec};
+mod post_processing;
+pub use post_processing::{post_process, PostProcessStrategy};
 
 #[derive(Debug)]
 pub enum PipelineError {
@@ -66,6 +68,8 @@ pub struct PipelineConfig {
     pub pad_token_id: Option<i64>,
     pub use_kv_cache: bool,
     pub device: DeviceConfig,
+    pub post_process: Option<PostProcessStrategy>,
+    pub post_process_british: bool,
 }
 
 impl PipelineConfig {
@@ -84,6 +88,8 @@ impl PipelineConfig {
             pad_token_id: None,
             use_kv_cache,
             device,
+            post_process: None,
+            post_process_british: false,
         }
     }
 }
@@ -199,6 +205,11 @@ impl G2pPipeline {
                     .tokenizer
                     .decode_ids(&generated[start..end], true)
                     .map_err(PipelineError::Tokenizer)?;
+                let decoded = if let Some(strategy) = self.config.post_process {
+                    post_process(strategy, &decoded, self.config.post_process_british)
+                } else {
+                    decoded
+                };
                 results.push(decoded);
             }
         }

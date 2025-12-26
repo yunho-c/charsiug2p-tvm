@@ -7,7 +7,7 @@ use clap::Parser;
 
 use charsiug2p_g2p_core::G2pConfig;
 use charsiug2p_g2p_pipeline::{
-    ArtifactResolver, ArtifactRoots, ArtifactSpec, G2pPipeline, PipelineConfig,
+    ArtifactResolver, ArtifactRoots, ArtifactSpec, G2pPipeline, PipelineConfig, PostProcessStrategy,
 };
 use charsiug2p_g2p_tvm::{DeviceConfig, TvmArtifacts};
 
@@ -85,6 +85,14 @@ struct Args {
     device_id: i32,
     #[arg(long, default_value_t = false, help = "Insert a space after the language prefix")]
     space_after_colon: bool,
+    #[arg(
+        long,
+        default_value = "none",
+        help = "Post-process strategy (none, ipa-flap-vowel-reduced)"
+    )]
+    post_process: String,
+    #[arg(long, default_value_t = false, help = "Apply British post-process rules")]
+    post_process_british: bool,
     #[arg(long, default_value_t = false, help = "Use statically linked system-lib artifacts")]
     system_lib: bool,
     #[arg(help = "Words to convert to phonemes")]
@@ -114,13 +122,22 @@ fn main() {
             process::exit(1);
         }
     };
-    let pipeline_config = PipelineConfig::from_core(
+    let post_process = match parse_post_process(&args.post_process) {
+        Ok(value) => value,
+        Err(err) => {
+            eprintln!("{err}");
+            process::exit(1);
+        }
+    };
+    let mut pipeline_config = PipelineConfig::from_core(
         &core_config,
         args.batch_size,
         None,
         args.kv_cache,
         device,
     );
+    pipeline_config.post_process = post_process;
+    pipeline_config.post_process_british = args.post_process_british;
     let artifact_spec = ArtifactSpec {
         checkpoint: args.checkpoint.clone(),
         max_input_bytes: args.max_input_bytes,
@@ -203,6 +220,8 @@ fn main() {
             &core_config,
             args.kv_cache,
             device,
+            post_process,
+            args.post_process_british,
             args.tvm_ext.as_deref(),
             &batch_sizes,
         )
@@ -391,6 +410,8 @@ fn run_with_batch_sizes(
     core_config: &G2pConfig,
     kv_cache: bool,
     device: DeviceConfig,
+    post_process: Option<PostProcessStrategy>,
+    post_process_british: bool,
     tvm_ext: Option<&str>,
     batch_sizes: &[usize],
 ) -> Result<Vec<String>, String> {
@@ -408,7 +429,9 @@ fn run_with_batch_sizes(
             let artifacts = resolver
                 .resolve_tvm_artifacts(&spec, tvm_ext, kv_cache)
                 .map_err(|err| format!("Failed to locate TVM artifacts for batch_size={batch_size}: {err}"))?;
-            let config = PipelineConfig::from_core(core_config, batch_size, None, kv_cache, device);
+            let mut config = PipelineConfig::from_core(core_config, batch_size, None, kv_cache, device);
+            config.post_process = post_process;
+            config.post_process_british = post_process_british;
             let pipeline = G2pPipeline::load(tokenizer_metadata, artifacts, config)
                 .map_err(|err| format!("Failed to initialize pipeline for batch_size={batch_size}: {err}"))?;
             pipelines.insert(batch_size, pipeline);
@@ -435,4 +458,15 @@ fn default_device_for_target(target: &str) -> &'static str {
         "webgpu" => "webgpu",
         _ => "cpu",
     }
+}
+
+fn parse_post_process(value: &str) -> Result<Option<PostProcessStrategy>, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") || trimmed.eq_ignore_ascii_case("off") {
+        return Ok(None);
+    }
+    PostProcessStrategy::parse(trimmed).map(Some).map_err(|_| {
+        let variants = PostProcessStrategy::variants().join(", ");
+        format!("Unsupported post-process strategy: {trimmed}. Supported: none, {variants}.")
+    })
 }
