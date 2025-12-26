@@ -10,6 +10,7 @@ import random
 
 from charsiug2p_tvm.harness import reference_g2p
 from charsiug2p_tvm.post_processing import (
+    STRESS_PREFIXES,
     espeak_ipa_to_misaki,
     fix_stress_placement,
     normalize_strategy,
@@ -62,6 +63,15 @@ class AnalysisReport:
     mode_coverage_by_strategy: dict[str, list[FailureModeCoverage]]
     primary_mode_metrics_by_strategy: dict[str, list[FailureModeMetrics]]
     samples: list[AnalysisSample] | None
+
+
+@dataclass(frozen=True)
+class StressPrefixMetrics:
+    prefix: str
+    any_total: int
+    primary_total: int
+    swap_candidates: int
+    extra_initial_secondary: int
 
 
 def _grow_dictionary(entries: dict[str, object]) -> dict[str, object]:
@@ -311,6 +321,25 @@ def pick_primary_mode(tags: set[str]) -> str:
     return "other"
 
 
+def _match_stress_prefix(word: str) -> str | None:
+    lowered = word.lower()
+    for prefix in STRESS_PREFIXES:
+        if lowered.startswith(prefix) and len(lowered) > len(prefix):
+            return prefix
+    return None
+
+
+def _stress_signature(text: str) -> list[str]:
+    return [char for char in text if char in {"ˈ", "ˌ"}]
+
+
+def _first_stress(text: str) -> str | None:
+    for char in text:
+        if char in {"ˈ", "ˌ"}:
+            return char
+    return None
+
+
 def _resolve_words(
     scope: str,
     dataset: dict[str, str],
@@ -382,7 +411,7 @@ def analyze_misaki_english(
         mapped_by_strategy: dict[str, str] = {}
         mapped_stress_by_strategy: dict[str, str] = {}
         for strategy in normalized_strategies:
-            mapped = espeak_ipa_to_misaki(ipa, british=british, strategy=strategy)
+            mapped = espeak_ipa_to_misaki(ipa, british=british, strategy=strategy, word=word)
             mapped_stress = fix_stress_placement(mapped)
             mapped_by_strategy[strategy] = mapped
             mapped_stress_by_strategy[strategy] = mapped_stress
@@ -567,3 +596,69 @@ def filter_samples_by_mode(
             continue
         filtered.append(sample)
     return filtered
+
+
+def build_stress_prefix_report(
+    samples: Sequence[AnalysisSample],
+    *,
+    strategy: str,
+) -> list[StressPrefixMetrics]:
+    normalized_strategy = normalize_strategy(strategy)
+    stats: dict[str, dict[str, int]] = {}
+
+    for sample in samples:
+        prefix = _match_stress_prefix(sample.word)
+        if prefix is None:
+            continue
+        hyp = sample.mapped_stress_by_strategy.get(normalized_strategy)
+        if hyp is None:
+            raise ValueError(f"Missing mapped output for strategy: {normalized_strategy}")
+        tags = classify_failure_modes(sample.misaki, hyp)
+        if not tags:
+            tags = {"match"}
+        primary = "match" if tags == {"match"} else pick_primary_mode(tags)
+        if "stress_mismatch" not in tags and "stress_only" not in tags and primary not in {
+            "stress_mismatch",
+            "stress_only",
+        }:
+            continue
+
+        entry = stats.setdefault(
+            prefix,
+            {
+                "any_total": 0,
+                "primary_total": 0,
+                "swap_candidates": 0,
+                "extra_initial_secondary": 0,
+            },
+        )
+        if "stress_mismatch" in tags or "stress_only" in tags:
+            entry["any_total"] += 1
+        if primary in {"stress_mismatch", "stress_only"}:
+            entry["primary_total"] += 1
+
+        ref_sig = _stress_signature(sample.misaki)
+        hyp_sig = _stress_signature(hyp)
+        if (
+            ref_sig.count("ˈ") == 1
+            and ref_sig.count("ˌ") == 1
+            and hyp_sig.count("ˈ") == 1
+            and hyp_sig.count("ˌ") == 1
+            and ref_sig != hyp_sig
+        ):
+            entry["swap_candidates"] += 1
+        if _first_stress(hyp) == "ˌ" and _first_stress(sample.misaki) != "ˌ":
+            entry["extra_initial_secondary"] += 1
+
+    metrics: list[StressPrefixMetrics] = []
+    for prefix, values in stats.items():
+        metrics.append(
+            StressPrefixMetrics(
+                prefix=prefix,
+                any_total=values["any_total"],
+                primary_total=values["primary_total"],
+                swap_candidates=values["swap_candidates"],
+                extra_initial_secondary=values["extra_initial_secondary"],
+            )
+        )
+    return sorted(metrics, key=lambda item: item.primary_total, reverse=True)

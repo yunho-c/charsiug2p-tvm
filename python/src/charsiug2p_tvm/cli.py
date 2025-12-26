@@ -26,6 +26,7 @@ from charsiug2p_tvm.tvm_runtime import (
 from charsiug2p_tvm.eval import evaluate_against_reference, prepare_samples
 from charsiug2p_tvm.misaki_analysis import (
     analyze_misaki_english,
+    build_stress_prefix_report,
     filter_samples_by_mode,
     write_analysis_csv,
 )
@@ -674,7 +675,10 @@ def analyze_misaki(
     strategies: list[str] | None = typer.Option(
         None,
         "--strategy",
-        help="Mapping strategy (espeak, ipa, ipa-flap, ipa-vowel, ipa-flap-vowel). Repeatable or comma-separated.",
+        help=(
+            "Mapping strategy (espeak, ipa, ipa-flap, ipa-vowel, ipa-flap-vowel, "
+            "ipa-vowel-stress, ipa-flap-vowel-stress). Repeatable or comma-separated."
+        ),
     ),
     limit: int | None = typer.Option(None, help="Limit number of words evaluated."),
     shuffle: bool = typer.Option(False, help="Shuffle word list before limiting."),
@@ -695,6 +699,16 @@ def analyze_misaki(
     ),
     verbose: bool = typer.Option(False, "--verbose", help="Show extra columns in mode tables."),
     output_csv: Path | None = typer.Option(None, "--output-csv", help="Write per-word results to CSV."),
+    stress_prefix_report: bool = typer.Option(
+        False,
+        "--stress-prefix-report",
+        help="Show prefix summary for stress mismatches.",
+    ),
+    stress_prefix_limit: int = typer.Option(
+        12,
+        "--stress-prefix-limit",
+        help="Max prefixes to display in the stress prefix summary.",
+    ),
     sample_strategy: str | None = typer.Option(
         None,
         "--sample-strategy",
@@ -733,6 +747,11 @@ def analyze_misaki(
         parsed_strategies = _parse_multi(strategies)
     if not parsed_strategies:
         parsed_strategies = ["espeak", "ipa"]
+    experimental_strategies = {"ipa-vowel-prefix", "ipa-flap-vowel-prefix"}
+    if experimental_strategies.intersection(parsed_strategies):
+        console.print(
+            "[yellow]Warning:[/yellow] prefix-based stress strategies are experimental and currently underperform."
+        )
     parsed_sample_modes = _parse_multi(sample_mode)
     parsed_sample_primary = _parse_multi(sample_primary)
     wants_sample_filter = bool(parsed_sample_modes or parsed_sample_primary)
@@ -757,7 +776,7 @@ def analyze_misaki(
         seed=seed,
         device=device,
         batch_size=batch_size,
-        include_samples=output_csv is not None,
+        include_samples=output_csv is not None or stress_prefix_report,
     )
 
     console.print(
@@ -843,6 +862,33 @@ def analyze_misaki(
                 row.append(f"{metric.cer:.4f}")
                 primary_table.add_row(*row)
             console.print(primary_table)
+
+    if stress_prefix_report:
+        if report.samples is None:
+            raise typer.BadParameter("No samples available for prefix report.")
+        for strategy in report.strategies:
+            prefix_metrics = build_stress_prefix_report(report.samples, strategy=strategy)
+            if not prefix_metrics:
+                continue
+            prefix_table = Table(
+                title=f"Stress Prefix Summary ({strategy}, mapped+stress)",
+                show_header=True,
+                header_style="bold",
+            )
+            prefix_table.add_column("Prefix", style="cyan")
+            prefix_table.add_column("Any", style="white", justify="right")
+            prefix_table.add_column("Primary", style="white", justify="right")
+            prefix_table.add_column("Swap", style="white", justify="right")
+            prefix_table.add_column("Extra ˌ", style="white", justify="right")
+            for metric in prefix_metrics[: abs(stress_prefix_limit)]:
+                prefix_table.add_row(
+                    metric.prefix,
+                    str(metric.any_total),
+                    str(metric.primary_total),
+                    str(metric.swap_candidates),
+                    str(metric.extra_initial_secondary),
+                )
+            console.print(prefix_table)
 
     if output_csv is not None:
         if report.samples is None:

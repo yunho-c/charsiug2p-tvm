@@ -1,6 +1,16 @@
 from __future__ import annotations
 
-SUPPORTED_STRATEGIES = {"espeak", "ipa", "ipa-flap", "ipa-vowel", "ipa-flap-vowel"}
+SUPPORTED_STRATEGIES = {
+    "espeak",
+    "ipa",
+    "ipa-flap",
+    "ipa-vowel",
+    "ipa-flap-vowel",
+    "ipa-vowel-stress",
+    "ipa-flap-vowel-stress",
+    "ipa-vowel-prefix",
+    "ipa-flap-vowel-prefix",
+}
 
 _FROM_ESPEAKS = sorted(
     {
@@ -90,9 +100,61 @@ _IPA_REWRITES_VOWEL = sorted(
     key=lambda kv: -len(kv[0]),
 )
 
-_IPA_STRATEGIES = {"ipa", "ipa-flap", "ipa-vowel", "ipa-flap-vowel"}
-_VOWEL_TUNED_STRATEGIES = {"ipa-vowel", "ipa-flap-vowel"}
-_FLAP_STRATEGIES = {"ipa-flap", "ipa-flap-vowel"}
+_IPA_STRATEGIES = {
+    "ipa",
+    "ipa-flap",
+    "ipa-vowel",
+    "ipa-flap-vowel",
+    "ipa-vowel-stress",
+    "ipa-flap-vowel-stress",
+    "ipa-vowel-prefix",
+    "ipa-flap-vowel-prefix",
+}
+_VOWEL_TUNED_STRATEGIES = {
+    "ipa-vowel",
+    "ipa-flap-vowel",
+    "ipa-vowel-stress",
+    "ipa-flap-vowel-stress",
+    "ipa-vowel-prefix",
+    "ipa-flap-vowel-prefix",
+}
+_STRESS_TUNED_STRATEGIES = {"ipa-vowel-stress", "ipa-flap-vowel-stress"}
+_PREFIX_STRESS_STRATEGIES = {"ipa-vowel-prefix", "ipa-flap-vowel-prefix"}
+_FLAP_STRATEGIES = {"ipa-flap", "ipa-flap-vowel", "ipa-flap-vowel-stress"}
+_STRESS_MARKERS = {"ˈ", "ˌ"}
+_STRESS_TOKEN_UNITS = ["ᵊl", "ᵊn", "ᵊm", "ɜɹ", "əɹ"]
+_REDUCED_STRESS_VOWELS = {"ɪ", "ᵻ", "ə", "ᵊ"}
+_VOWEL_TOKENS = _VOWELS | {"ɜɹ", "əɹ", "ᵊl", "ᵊn", "ᵊm"}
+STRESS_PREFIXES = (
+    "under",
+    "over",
+    "inter",
+    "intra",
+    "intro",
+    "super",
+    "sub",
+    "anti",
+    "auto",
+    "counter",
+    "trans",
+    "tele",
+    "pre",
+    "pro",
+    "con",
+    "com",
+    "dis",
+    "mis",
+    "non",
+    "out",
+    "per",
+    "re",
+    "un",
+    "in",
+    "im",
+    "il",
+    "ir",
+)
+_STRESS_DROP_PREFIXES = {"re", "un", "in", "im", "il", "ir"}
 
 
 def normalize_strategy(strategy: str) -> str:
@@ -103,7 +165,19 @@ def normalize_strategy(strategy: str) -> str:
     if "ipa" in parts:
         has_flap = "flap" in parts or "flaps" in parts
         has_vowel = "vowel" in parts or "vowels" in parts
-        if has_flap and has_vowel:
+        has_stress = "stress" in parts or "stresses" in parts
+        has_prefix = "prefix" in parts or "pref" in parts
+        if has_prefix:
+            has_vowel = True
+        if has_flap and has_vowel and has_stress:
+            normalized = "ipa-flap-vowel-stress"
+        elif has_vowel and has_stress:
+            normalized = "ipa-vowel-stress"
+        elif has_flap and has_prefix:
+            normalized = "ipa-flap-vowel-prefix"
+        elif has_prefix:
+            normalized = "ipa-vowel-prefix"
+        elif has_flap and has_vowel:
             normalized = "ipa-flap-vowel"
         elif has_vowel:
             normalized = "ipa-vowel"
@@ -161,6 +235,111 @@ def _apply_flap(text: str) -> str:
         result.append(char)
         i += 1
     return "".join(result)
+
+
+def _tokenize_for_stress(text: str) -> list[str]:
+    tokens: list[str] = []
+    i = 0
+    while i < len(text):
+        if text[i] in _STRESS_MARKERS:
+            tokens.append(text[i])
+            i += 1
+            continue
+        matched = False
+        for unit in _STRESS_TOKEN_UNITS:
+            if text.startswith(unit, i):
+                tokens.append(unit)
+                i += len(unit)
+                matched = True
+                break
+        if matched:
+            continue
+        tokens.append(text[i])
+        i += 1
+    return tokens
+
+
+def _next_vowel_token(tokens: list[str], start: int) -> str | None:
+    for idx in range(start, len(tokens)):
+        if tokens[idx] in _VOWEL_TOKENS:
+            return tokens[idx]
+    return None
+
+
+def _apply_stress_normalization(text: str) -> str:
+    tokens = _tokenize_for_stress(text)
+    if not tokens:
+        return text
+
+    has_primary = "ˈ" in tokens
+    saw_primary = False
+    output: list[str] = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token in _STRESS_MARKERS:
+            next_vowel = _next_vowel_token(tokens, i + 1)
+            if token == "ˈ":
+                if saw_primary:
+                    if next_vowel in _REDUCED_STRESS_VOWELS:
+                        i += 1
+                        continue
+                    output.append("ˌ")
+                else:
+                    output.append("ˈ")
+                    saw_primary = True
+                i += 1
+                continue
+            if has_primary and next_vowel in _REDUCED_STRESS_VOWELS:
+                i += 1
+                continue
+            output.append("ˌ")
+            i += 1
+            continue
+        output.append(token)
+        i += 1
+    return "".join(output)
+
+
+def _match_stress_prefix(word: str | None) -> str | None:
+    if not word:
+        return None
+    lowered = word.lower()
+    for prefix in STRESS_PREFIXES:
+        if lowered.startswith(prefix) and len(lowered) > len(prefix):
+            return prefix
+    return None
+
+
+def _stress_signature(text: str) -> list[str]:
+    return [char for char in text if char in _STRESS_MARKERS]
+
+
+def _first_stress(text: str) -> str | None:
+    for char in text:
+        if char in _STRESS_MARKERS:
+            return char
+    return None
+
+
+def _apply_prefix_stress_rules(text: str, word: str | None) -> str:
+    prefix = _match_stress_prefix(word)
+    if prefix is None:
+        return text
+    signature = _stress_signature(text)
+    if signature.count("ˈ") == 1 and signature.count("ˌ") == 1:
+        primary_idx = text.find("ˈ")
+        secondary_idx = text.find("ˌ")
+        if 0 <= primary_idx < secondary_idx:
+            chars = list(text)
+            chars[primary_idx] = "ˌ"
+            chars[secondary_idx] = "ˈ"
+            text = "".join(chars)
+    if prefix in _STRESS_DROP_PREFIXES and signature.count("ˈ") == 1 and signature.count("ˌ") == 1:
+        first_stress = _first_stress(text)
+        if first_stress == "ˌ":
+            text = text.replace("ˌ", "", 1)
+    return text
 
 
 def _apply_vowel_tuning(text: str) -> str:
@@ -226,7 +405,7 @@ def _apply_vowel_tuning(text: str) -> str:
     return "".join(result)
 
 
-def espeak_ipa_to_misaki(ipa: str, *, british: bool, strategy: str = "espeak") -> str:
+def espeak_ipa_to_misaki(ipa: str, *, british: bool, strategy: str = "espeak", word: str | None = None) -> str:
     strategy = normalize_strategy(strategy)
     result = ipa
     if strategy in _IPA_STRATEGIES:
@@ -249,6 +428,10 @@ def espeak_ipa_to_misaki(ipa: str, *, british: bool, strategy: str = "espeak") -
     result = result.replace("^", "")
     if strategy in _VOWEL_TUNED_STRATEGIES:
         result = _apply_vowel_tuning(result)
+    if strategy in _PREFIX_STRESS_STRATEGIES:
+        result = _apply_prefix_stress_rules(result, word)
+    if strategy in _STRESS_TUNED_STRATEGIES:
+        result = _apply_stress_normalization(result)
     if strategy in _FLAP_STRATEGIES:
         result = _apply_flap(result)
     return result

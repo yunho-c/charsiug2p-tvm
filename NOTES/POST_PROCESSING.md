@@ -23,6 +23,10 @@ This note captures what we learned while mapping CharsiuG2P IPA output into Misa
 - `ipa-flap`: Same as `ipa` but also adds a simple flapping heuristic (`t` between vowels → `ɾ`). This is useful when CharsiuG2P outputs `t` for intervocalic flaps but Misaki’s lexicon uses `ɾ`.
 - `ipa-vowel`: Extends `ipa` with vowel tuning. It promotes stressed schwas to `ʌ`, demotes unstressed `ɜɹ` to `əɹ`, maps unstressed `ɪd/ɪz` to `ᵻd/ᵻz`, and adds an explicit `əɫ → ᵊl` rewrite while avoiding blanket `ən/əm → ᵊn/ᵊm` conversions (favoring syllabic markers instead).
 - `ipa-flap-vowel`: Combines `ipa-vowel` with the flapping heuristic.
+- `ipa-vowel-stress`: Adds a stress-normalization pass on top of `ipa-vowel`. It demotes extra primary stresses after the first, and drops secondary stress on reduced vowels (`ɪ/ᵻ/ə/ᵊ`) when a primary stress already exists.
+- `ipa-flap-vowel-stress`: Combines `ipa-vowel-stress` with the flapping heuristic.
+- `ipa-vowel-prefix` (experimental): Adds prefix-aware stress rules on top of `ipa-vowel`. If a prefixed word has exactly one primary and one secondary stress but the primary appears before the secondary, the stresses are swapped. For short prefixes (`re/un/in/im/il/ir`), an initial `ˌ` is dropped when there is only one secondary stress marker. Current results show this underperforms, so it is not recommended for default comparisons.
+- `ipa-flap-vowel-prefix` (experimental): Combines `ipa-vowel-prefix` with the flapping heuristic. Also underperforms relative to `ipa-flap-vowel`.
 
 ## Implementation pointers
 
