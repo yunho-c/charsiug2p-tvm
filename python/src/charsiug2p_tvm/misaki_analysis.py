@@ -45,6 +45,13 @@ class FailureModeMetrics:
 
 
 @dataclass(frozen=True)
+class FailureModeCoverage:
+    name: str
+    total: int
+    rate: float
+
+
+@dataclass(frozen=True)
 class AnalysisReport:
     total: int
     dataset_words: int
@@ -52,6 +59,8 @@ class AnalysisReport:
     strategies: list[str]
     metrics: list[MappingMetrics]
     mode_metrics_by_strategy: dict[str, list[FailureModeMetrics]]
+    mode_coverage_by_strategy: dict[str, list[FailureModeCoverage]]
+    primary_mode_metrics_by_strategy: dict[str, list[FailureModeMetrics]]
     samples: list[AnalysisSample] | None
 
 
@@ -191,6 +200,28 @@ def classify_failure_modes(ref: str, hyp: str) -> set[str]:
     return tags
 
 
+_MODE_PRIORITY = [
+    "stress_only",
+    "stress_mismatch",
+    "syllabic_schwa",
+    "rhotic_vowel",
+    "diphthong_token",
+    "affricate_token",
+    "flap",
+    "reduced_vowel",
+    "other",
+]
+
+
+def pick_primary_mode(tags: set[str]) -> str:
+    if not tags:
+        return "none"
+    for mode in _MODE_PRIORITY:
+        if mode in tags:
+            return mode
+    return "other"
+
+
 def _resolve_words(
     scope: str,
     dataset: dict[str, str],
@@ -280,7 +311,7 @@ def analyze_misaki_english(
                 )
             )
 
-    total = len(misaki_outputs)
+    total_samples = len(misaki_outputs)
     metrics: list[MappingMetrics] = []
     for strategy in normalized_strategies:
         for suffix, outputs in (
@@ -289,52 +320,102 @@ def analyze_misaki_english(
         ):
             name = f"{strategy}{suffix}"
             exact = sum(1 for ref, hyp in zip(misaki_outputs, outputs) if ref == hyp)
-            cer = sum(_cer(ref, hyp) for ref, hyp in zip(misaki_outputs, outputs)) / total if total else 0.0
+            cer = (
+                sum(_cer(ref, hyp) for ref, hyp in zip(misaki_outputs, outputs)) / total_samples
+                if total_samples
+                else 0.0
+            )
             metrics.append(
                 MappingMetrics(
                     name=name,
                     exact_match=exact,
-                    exact_match_rate=exact / total if total else 0.0,
+                    exact_match_rate=exact / total_samples if total_samples else 0.0,
                     cer=cer,
                 )
             )
 
     mode_metrics_by_strategy: dict[str, list[FailureModeMetrics]] = {}
+    mode_coverage_by_strategy: dict[str, list[FailureModeCoverage]] = {}
+    primary_mode_metrics_by_strategy: dict[str, list[FailureModeMetrics]] = {}
     for strategy in normalized_strategies:
         mode_counts: dict[str, dict[str, float]] = {}
+        coverage_counts: dict[str, float] = {}
+        primary_counts: dict[str, dict[str, float]] = {}
+
         for ref, hyp in zip(misaki_outputs, mapped_stress_outputs[strategy]):
             tags = classify_failure_modes(ref, hyp)
             if not tags:
-                continue
+                tags = {"match"}
+            primary = pick_primary_mode(tags) if tags != {"match"} else "match"
             cer = _cer(ref, hyp)
+
             for tag in tags:
                 stats = mode_counts.setdefault(tag, {"total": 0.0, "exact": 0.0, "cer": 0.0})
                 stats["total"] += 1.0
                 stats["exact"] += 1.0 if ref == hyp else 0.0
                 stats["cer"] += cer
+
+                coverage_counts[tag] = coverage_counts.get(tag, 0.0) + 1.0
+
+            primary_stats = primary_counts.setdefault(primary, {"total": 0.0, "exact": 0.0, "cer": 0.0})
+            primary_stats["total"] += 1.0
+            primary_stats["exact"] += 1.0 if ref == hyp else 0.0
+            primary_stats["cer"] += cer
+
         mode_metrics: list[FailureModeMetrics] = []
         for tag, stats in mode_counts.items():
-            total = int(stats["total"])
+            tag_total = int(stats["total"])
             exact = int(stats["exact"])
-            cer = stats["cer"] / total if total else 0.0
+            cer = stats["cer"] / tag_total if tag_total else 0.0
             mode_metrics.append(
                 FailureModeMetrics(
                     name=tag,
-                    total=total,
+                    total=tag_total,
                     exact_match=exact,
-                    exact_match_rate=exact / total if total else 0.0,
+                    exact_match_rate=exact / tag_total if tag_total else 0.0,
                     cer=cer,
                 )
             )
         mode_metrics_by_strategy[strategy] = sorted(mode_metrics, key=lambda metric: metric.total, reverse=True)
 
+        coverage_metrics: list[FailureModeCoverage] = []
+        for tag, count in coverage_counts.items():
+            coverage_metrics.append(
+                FailureModeCoverage(
+                    name=tag,
+                    total=int(count),
+                    rate=(count / total_samples) if total_samples else 0.0,
+                )
+            )
+        mode_coverage_by_strategy[strategy] = sorted(coverage_metrics, key=lambda metric: metric.total, reverse=True)
+
+        primary_metrics: list[FailureModeMetrics] = []
+        for tag, stats in primary_counts.items():
+            total_count = int(stats["total"])
+            exact = int(stats["exact"])
+            cer = stats["cer"] / total_count if total_count else 0.0
+            primary_metrics.append(
+                FailureModeMetrics(
+                    name=tag,
+                    total=total_count,
+                    exact_match=exact,
+                    exact_match_rate=exact / total_count if total_count else 0.0,
+                    cer=cer,
+                )
+            )
+        primary_mode_metrics_by_strategy[strategy] = sorted(
+            primary_metrics, key=lambda metric: metric.total, reverse=True
+        )
+
     return AnalysisReport(
-        total=total,
+        total=total_samples,
         dataset_words=len(dataset),
         lexicon_words=len(lexicon),
         strategies=normalized_strategies,
         metrics=metrics,
         mode_metrics_by_strategy=mode_metrics_by_strategy,
+        mode_coverage_by_strategy=mode_coverage_by_strategy,
+        primary_mode_metrics_by_strategy=primary_mode_metrics_by_strategy,
         samples=samples if include_samples else None,
     )
 

@@ -681,6 +681,15 @@ def analyze_misaki(
         10,
         help="Max failure modes to display per strategy (0 to hide).",
     ),
+    coverage_limit: int = typer.Option(
+        10,
+        help="Max coverage modes to display per strategy (0 to hide).",
+    ),
+    primary_limit: int = typer.Option(
+        10,
+        help="Max primary-mode rows to display per strategy (0 to hide).",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", help="Show extra columns in mode tables."),
     output_csv: Path | None = typer.Option(None, "--output-csv", help="Write per-word results to CSV."),
 ) -> None:
     source = source.lower().strip()
@@ -745,16 +754,60 @@ def analyze_misaki(
             )
             mode_table.add_column("Mode", style="cyan")
             mode_table.add_column("Samples", style="white", justify="right")
-            mode_table.add_column("Exact match", style="white", justify="right")
+            if verbose:
+                mode_table.add_column("Exact match", style="white", justify="right")
             mode_table.add_column("CER", style="white", justify="right")
             for metric in mode_metrics[: abs(mode_limit)]:
-                mode_table.add_row(
+                row = [metric.name, str(metric.total)]
+                if verbose:
+                    row.append(f"{metric.exact_match} ({metric.exact_match_rate:.2%})")
+                row.append(f"{metric.cer:.4f}")
+                mode_table.add_row(*row)
+            console.print(mode_table)
+
+    if coverage_limit != 0:
+        for strategy in report.strategies:
+            coverage_metrics = report.mode_coverage_by_strategy.get(strategy, [])
+            if not coverage_metrics:
+                continue
+            coverage_table = Table(
+                title=f"Mode Coverage ({strategy}, mapped+stress)",
+                show_header=True,
+                header_style="bold",
+            )
+            coverage_table.add_column("Mode", style="cyan")
+            coverage_table.add_column("Samples", style="white", justify="right")
+            coverage_table.add_column("Rate", style="white", justify="right")
+            for metric in coverage_metrics[: abs(coverage_limit)]:
+                coverage_table.add_row(
                     metric.name,
                     str(metric.total),
-                    f"{metric.exact_match} ({metric.exact_match_rate:.2%})",
-                    f"{metric.cer:.4f}",
+                    f"{metric.rate:.2%}",
                 )
-            console.print(mode_table)
+            console.print(coverage_table)
+
+    if primary_limit != 0:
+        for strategy in report.strategies:
+            primary_metrics = report.primary_mode_metrics_by_strategy.get(strategy, [])
+            if not primary_metrics:
+                continue
+            primary_table = Table(
+                title=f"Primary Mode ({strategy}, mapped+stress)",
+                show_header=True,
+                header_style="bold",
+            )
+            primary_table.add_column("Mode", style="cyan")
+            primary_table.add_column("Samples", style="white", justify="right")
+            if verbose:
+                primary_table.add_column("Exact match", style="white", justify="right")
+            primary_table.add_column("CER", style="white", justify="right")
+            for metric in primary_metrics[: abs(primary_limit)]:
+                row = [metric.name, str(metric.total)]
+                if verbose:
+                    row.append(f"{metric.exact_match} ({metric.exact_match_rate:.2%})")
+                row.append(f"{metric.cer:.4f}")
+                primary_table.add_row(*row)
+            console.print(primary_table)
 
     if output_csv is not None:
         if report.samples is None:

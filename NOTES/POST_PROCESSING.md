@@ -36,9 +36,56 @@ This note captures what we learned while mapping CharsiuG2P IPA output into Misa
 ## Implementation status
 
 - Failure-mode classification + per-mode metrics: implemented in `python/src/charsiug2p_tvm/misaki_analysis.py` and surfaced in the CLI output (`analyze-misaki`).
+- Coverage and primary-mode summaries are also available to separate prevalence from per-mode accuracy.
 - Strategy comparison remains available via `--strategy` (repeatable or comma-separated).
 
 ## Suggested next experiments
 
 - Run `analyze-misaki` with `--strategy espeak,ipa,ipa-flap` on a larger sample to see if the additional IPA rewrites help consistently.
 - Add optional toggles for individual IPA rewrites (dark-L, diphthongs, syllabic consonants) to isolate which changes help or hurt.
+
+## Context and implementation plan (diff-based mode tagging)
+
+### Why change mode tagging
+
+Current failure modes are presence-based: if a string contains `ə` or `ɜ`, it gets tagged `reduced_vowel` even when that token is not part of the mismatch. This inflates mode counts and makes the primary-mode table less meaningful. Diff-based tagging will only assign a mode when the mismatch actually involves a relevant substitution or insertion/deletion.
+
+### Plan overview
+
+1) Tokenize phoneme strings into units before diffing.
+   - Keep stress markers (`ˈ`, `ˌ`) as standalone tokens.
+   - Collapse multi-character tokens so the diff is more faithful to phoneme units.
+   - Suggested collapse set (longest-first):
+     - Diphthongs: `aɪ`, `aʊ`, `eɪ`, `oʊ`, `ɔɪ`, `əʊ`
+     - Affricates: `tʃ`, `dʒ`
+     - Rhotic combos: `ɜɹ`, `əɹ`
+     - Syllabic combos: `ᵊl`, `ᵊn`, `ᵊm` (or keep `ᵊ` + consonant as separate tokens if simpler)
+
+2) Compute edit ops on token sequences.
+   - Implement a Levenshtein backtrace that yields `sub(old, new)`, `ins(new)`, `del(old)` at the token level.
+   - Reuse the existing `_edit_distance` pattern but adapt it to token arrays.
+
+3) Map edit ops to modes (examples).
+   - `stress_only`: all ops are stress insertions/deletions/moves.
+   - `stress_mismatch`: any op involving `ˈ` or `ˌ`.
+   - `diphthong_token`: ops like `aɪ <-> I`, `aʊ <-> W`, `oʊ <-> O`, `eɪ <-> A`, `ɔɪ <-> Y`, `əʊ <-> Q`.
+   - `affricate_token`: ops like `tʃ <-> ʧ`, `dʒ <-> ʤ`.
+   - `rhotic_vowel`: ops involving `ɝ`, `ɚ`, `ɜɹ`, `əɹ`.
+   - `syllabic_schwa`: ops involving `ᵊ` or `ᵊl/ᵊn/ᵊm` vs `əl/ən/əm`.
+   - `flap`: `t <-> ɾ` substitutions or `ɾ` insert/delete.
+   - `reduced_vowel`: ops among `ə/ɪ/ʌ/ɜ/ᵻ/i` (but exclude those already tagged by rhotic or syllabic rules).
+   - Fallback: `other`.
+
+4) Replace the current presence-based `classify_failure_modes(ref, hyp)` with op-based tagging.
+   - Keep the primary-mode priority list, but apply it to the op-derived tags.
+   - Continue to tag `match` for exact matches so coverage tables still include that category.
+
+5) Validate and compare.
+   - Expect lower per-mode coverage (more realistic prevalence).
+   - Expect primary-mode distribution to shift away from stress dominance.
+   - Compare pre/post diff-based tagging on the same dataset to confirm interpretability improvements.
+
+### Optional enhancements
+
+- Add a CLI switch to choose presence-based vs diff-based tagging for quick A/B comparison.
+- Export per-op substitution counts (top substitutions) for targeted heuristic tuning.
