@@ -667,6 +667,11 @@ def analyze_misaki(
         "intersection",
         help="Word scope: intersection (dataset with misaki lexicon) or misaki (lexicon only).",
     ),
+    strategies: list[str] | None = typer.Option(
+        None,
+        "--strategy",
+        help="Mapping strategy (espeak, ipa, ipa-flap). Repeatable or comma-separated.",
+    ),
     limit: int | None = typer.Option(None, help="Limit number of words evaluated."),
     shuffle: bool = typer.Option(False, help="Shuffle word list before limiting."),
     seed: int | None = typer.Option(None, help="Shuffle seed."),
@@ -681,6 +686,16 @@ def analyze_misaki(
     if scope not in {"intersection", "misaki"}:
         raise typer.BadParameter(f"Unsupported scope: {scope}")
 
+    parsed_strategies: list[str] = []
+    if strategies:
+        for value in strategies:
+            for part in value.split(","):
+                part = part.strip()
+                if part:
+                    parsed_strategies.append(part)
+    if not parsed_strategies:
+        parsed_strategies = ["espeak", "ipa"]
+
     report = analyze_misaki_english(
         charsiu_path=charsiu_path,
         misaki_root=misaki_root,
@@ -688,6 +703,7 @@ def analyze_misaki(
         british=british,
         source=source,
         scope=scope,
+        strategies=parsed_strategies,
         limit=limit,
         shuffle=shuffle,
         seed=seed,
@@ -716,7 +732,7 @@ def analyze_misaki(
     if output_csv is not None:
         if report.samples is None:
             raise typer.BadParameter("No samples available to write.")
-        write_analysis_csv(output_csv, report.samples)
+        write_analysis_csv(output_csv, report.samples, report.strategies)
         console.print(f"[green]Saved CSV to {output_csv}[/green]")
 
 

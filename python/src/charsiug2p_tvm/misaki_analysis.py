@@ -9,57 +9,11 @@ import json
 import random
 
 from charsiug2p_tvm.harness import reference_g2p
-
-_FROM_ESPEAKS = sorted(
-    {
-        "\u0303": "",
-        "a^ɪ": "I",
-        "a^ʊ": "W",
-        "d^ʒ": "ʤ",
-        "e": "A",
-        "e^ɪ": "A",
-        "r": "ɹ",
-        "t^ʃ": "ʧ",
-        "x": "k",
-        "ç": "k",
-        "ɐ": "ə",
-        "ɔ^ɪ": "Y",
-        "ə^l": "ᵊl",
-        "ɚ": "əɹ",
-        "ɬ": "l",
-        "ʔ": "t",
-        "ʔn": "tᵊn",
-        "ʔˌn\u0329": "tᵊn",
-        "ʲ": "",
-        "ʲO": "jO",
-        "ʲQ": "jQ",
-    }.items(),
-    key=lambda kv: -len(kv[0]),
+from charsiug2p_tvm.post_processing import (
+    espeak_ipa_to_misaki,
+    fix_stress_placement,
+    normalize_strategy,
 )
-
-_VOWELS = {
-    "ɑ",
-    "ɔ",
-    "ɛ",
-    "ɜ",
-    "ɪ",
-    "ʊ",
-    "ʌ",
-    "ə",
-    "i",
-    "u",
-    "A",
-    "I",
-    "W",
-    "Y",
-    "O",
-    "Q",
-    "æ",
-    "a",
-    "ɒ",
-    "ᵻ",
-    "ᵊ",
-}
 
 
 @dataclass(frozen=True)
@@ -67,8 +21,8 @@ class AnalysisSample:
     word: str
     misaki: str
     charsiu_ipa: str
-    mapped: str
-    mapped_stress: str
+    mapped_by_strategy: dict[str, str]
+    mapped_stress_by_strategy: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -84,62 +38,9 @@ class AnalysisReport:
     total: int
     dataset_words: int
     lexicon_words: int
+    strategies: list[str]
     metrics: list[MappingMetrics]
     samples: list[AnalysisSample] | None
-
-
-def _swap_syllabic_markers(text: str) -> str:
-    chars = list(text)
-    i = 0
-    while i < len(chars):
-        if i + 1 < len(chars) and chars[i + 1] == "\u0329":
-            consonant = chars[i]
-            chars[i] = "ᵊ"
-            chars[i + 1] = consonant
-            i += 2
-        else:
-            i += 1
-    return "".join(chars).replace("\u0329", "")
-
-
-def espeak_ipa_to_misaki(ipa: str, *, british: bool) -> str:
-    result = ipa.replace("\u0361", "^")
-    for old, new in _FROM_ESPEAKS:
-        result = result.replace(old, new)
-    result = _swap_syllabic_markers(result)
-    if british:
-        result = result.replace("e^ə", "ɛː")
-        result = result.replace("iə", "ɪə")
-        result = result.replace("ə^ʊ", "Q")
-    else:
-        result = result.replace("o^ʊ", "O")
-        result = result.replace("ɜːɹ", "ɜɹ")
-        result = result.replace("ɜː", "ɜɹ")
-        result = result.replace("ɪə", "iə")
-        result = result.replace("ː", "")
-    return result.replace("^", "")
-
-
-def fix_stress_placement(misaki_tokens: str) -> str:
-    result: list[str] = []
-    pending_stress: str | None = None
-
-    for char in misaki_tokens:
-        if char in {"ˈ", "ˌ"}:
-            if pending_stress:
-                result.append(pending_stress)
-            pending_stress = char
-        elif char in _VOWELS:
-            if pending_stress:
-                result.append(pending_stress)
-                pending_stress = None
-            result.append(char)
-        else:
-            result.append(char)
-
-    if pending_stress:
-        result.append(pending_stress)
-    return "".join(result)
 
 
 def _grow_dictionary(entries: dict[str, object]) -> dict[str, object]:
@@ -256,6 +157,7 @@ def analyze_misaki_english(
     british: bool,
     source: str,
     scope: str,
+    strategies: Sequence[str],
     limit: int | None,
     shuffle: bool,
     seed: int | None,
@@ -263,6 +165,9 @@ def analyze_misaki_english(
     batch_size: int,
     include_samples: bool,
 ) -> AnalysisReport:
+    normalized_strategies = [normalize_strategy(strategy) for strategy in strategies]
+    if not normalized_strategies:
+        raise ValueError("At least one strategy is required.")
     lexicon = load_misaki_lexicon(misaki_root, british=british)
     dataset = load_charsiu_tsv(charsiu_path)
 
@@ -291,17 +196,22 @@ def analyze_misaki_english(
     else:
         raise ValueError(f"Unknown source: {source}")
 
-    mapped_outputs: list[str] = []
-    mapped_stress_outputs: list[str] = []
+    mapped_outputs: dict[str, list[str]] = {strategy: [] for strategy in normalized_strategies}
+    mapped_stress_outputs: dict[str, list[str]] = {strategy: [] for strategy in normalized_strategies}
     misaki_outputs: list[str] = []
     samples: list[AnalysisSample] = []
 
     for word, ipa in zip(words, charsiu_outputs):
         misaki = lexicon[word]
-        mapped = espeak_ipa_to_misaki(ipa, british=british)
-        mapped_stress = fix_stress_placement(mapped)
-        mapped_outputs.append(mapped)
-        mapped_stress_outputs.append(mapped_stress)
+        mapped_by_strategy: dict[str, str] = {}
+        mapped_stress_by_strategy: dict[str, str] = {}
+        for strategy in normalized_strategies:
+            mapped = espeak_ipa_to_misaki(ipa, british=british, strategy=strategy)
+            mapped_stress = fix_stress_placement(mapped)
+            mapped_by_strategy[strategy] = mapped
+            mapped_stress_by_strategy[strategy] = mapped_stress
+            mapped_outputs[strategy].append(mapped)
+            mapped_stress_outputs[strategy].append(mapped_stress)
         misaki_outputs.append(misaki)
         if include_samples:
             samples.append(
@@ -309,54 +219,66 @@ def analyze_misaki_english(
                     word=word,
                     misaki=misaki,
                     charsiu_ipa=ipa,
-                    mapped=mapped,
-                    mapped_stress=mapped_stress,
+                    mapped_by_strategy=mapped_by_strategy,
+                    mapped_stress_by_strategy=mapped_stress_by_strategy,
                 )
             )
 
     total = len(misaki_outputs)
     metrics: list[MappingMetrics] = []
-    for name, outputs in (
-        ("mapped", mapped_outputs),
-        ("mapped+stress", mapped_stress_outputs),
-    ):
-        exact = sum(1 for ref, hyp in zip(misaki_outputs, outputs) if ref == hyp)
-        cer = sum(_cer(ref, hyp) for ref, hyp in zip(misaki_outputs, outputs)) / total if total else 0.0
-        metrics.append(MappingMetrics(name=name, exact_match=exact, exact_match_rate=exact / total if total else 0.0, cer=cer))
+    for strategy in normalized_strategies:
+        for suffix, outputs in (
+            ("", mapped_outputs[strategy]),
+            ("+stress", mapped_stress_outputs[strategy]),
+        ):
+            name = f"{strategy}{suffix}"
+            exact = sum(1 for ref, hyp in zip(misaki_outputs, outputs) if ref == hyp)
+            cer = sum(_cer(ref, hyp) for ref, hyp in zip(misaki_outputs, outputs)) / total if total else 0.0
+            metrics.append(
+                MappingMetrics(
+                    name=name,
+                    exact_match=exact,
+                    exact_match_rate=exact / total if total else 0.0,
+                    cer=cer,
+                )
+            )
 
     return AnalysisReport(
         total=total,
         dataset_words=len(dataset),
         lexicon_words=len(lexicon),
+        strategies=normalized_strategies,
         metrics=metrics,
         samples=samples if include_samples else None,
     )
 
 
-def write_analysis_csv(path: Path, samples: Sequence[AnalysisSample]) -> None:
+def write_analysis_csv(path: Path, samples: Sequence[AnalysisSample], strategies: Sequence[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(
-            [
-                "word",
-                "misaki",
-                "charsiu_ipa",
-                "mapped",
-                "mapped_stress",
-                "match_mapped",
-                "match_mapped_stress",
-            ]
-        )
-        for sample in samples:
-            writer.writerow(
+        header = ["word", "misaki", "charsiu_ipa"]
+        for strategy in strategies:
+            header.extend(
                 [
-                    sample.word,
-                    sample.misaki,
-                    sample.charsiu_ipa,
-                    sample.mapped,
-                    sample.mapped_stress,
-                    int(sample.misaki == sample.mapped),
-                    int(sample.misaki == sample.mapped_stress),
+                    f"{strategy}_mapped",
+                    f"{strategy}_mapped_stress",
+                    f"{strategy}_match",
+                    f"{strategy}_match_stress",
                 ]
             )
+        writer.writerow(header)
+        for sample in samples:
+            row = [sample.word, sample.misaki, sample.charsiu_ipa]
+            for strategy in strategies:
+                mapped = sample.mapped_by_strategy.get(strategy, "")
+                mapped_stress = sample.mapped_stress_by_strategy.get(strategy, "")
+                row.extend(
+                    [
+                        mapped,
+                        mapped_stress,
+                        int(sample.misaki == mapped),
+                        int(sample.misaki == mapped_stress),
+                    ]
+                )
+            writer.writerow(row)
