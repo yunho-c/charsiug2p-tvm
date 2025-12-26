@@ -348,3 +348,17 @@ export TVM_FFI_LIB_DIR="/Users/yunhocho/GitHub/kokoro-tvm/reference/tvm/build-io
 ```
 
 This was done to bypass difficulties in passing this path dynamically from the Flutter/CocoaPods environment to the Cargo build script. This **must** be updated or parameterized for other machines to build the project. Ideally, this should be configurable via an environment variable or a local config file (e.g., `local.properties`).
+
+### Shared TVM Runtime Plugin (Dec 2025)
+
+The architecture has been refactored to use a shared `tvm_runtime_flutter` plugin that owns `libtvm_runtime.a` and `libtvm_ffi_static.a`. Model-specific plugins like `charsiug2p_flutter` now depend on it via:
+
+- `pubspec.yaml`: `tvm_runtime_flutter: path: ../external/tvm_flutter`
+- `podspec`: `s.dependency 'tvm_runtime_flutter'`
+
+This eliminates duplicate symbol errors when multiple TVM plugins are used together.
+
+**New Environment Variable:**
+- `TVM_FFI_EXTERNAL=1`: When set, `rust/g2p_tvm/build.rs` skips all TVM FFI linking, assuming CocoaPods provides the symbols. This is automatically set by `build_pod.sh` for iOS targets.
+
+See `NOTES/SHARED_TVM_RUNTIME_PLUGIN.md` for the full architecture design.
