@@ -123,6 +123,25 @@ pub struct SystemLibPrefixes {
 }
 
 impl SystemLibPrefixes {
+    pub fn new(base: impl AsRef<str>, use_kv_cache: bool) -> Self {
+        let base = base.as_ref();
+        if use_kv_cache {
+            Self {
+                encoder: format!("{base}encoder_"),
+                decoder: None,
+                decoder_prefill: Some(format!("{base}decoder_prefill_")),
+                decoder_step: Some(format!("{base}decoder_step_")),
+            }
+        } else {
+            Self {
+                encoder: format!("{base}encoder_"),
+                decoder: Some(format!("{base}decoder_")),
+                decoder_prefill: None,
+                decoder_step: None,
+            }
+        }
+    }
+
     pub fn has_kv_cache(&self) -> bool {
         self.decoder_prefill.is_some() && self.decoder_step.is_some()
     }

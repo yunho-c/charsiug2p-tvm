@@ -115,8 +115,7 @@ class CharsiuG2pAssets {
     required String assetPrefix,
     CharsiuG2pPlatformPaths? platformPaths,
   }) async {
-    final paths =
-        platformPaths ?? await CharsiuG2pPlatformChannels.getPaths();
+    final paths = platformPaths ?? await CharsiuG2pPlatformChannels.getPaths();
     final resourceDir = paths.resourceDir;
     if (resourceDir == null) {
       return null;

@@ -10,7 +10,7 @@ use charsiug2p_g2p_pipeline::{
     PipelineError,
 };
 use charsiug2p_g2p_tokenizer::{load_tokenizer_metadata, TokenizerError, TokenizerMetadata};
-use charsiug2p_g2p_tvm::{DeviceConfig, TvmError};
+use charsiug2p_g2p_tvm::{DeviceConfig, SystemLibPrefixes, TvmError};
 
 const DEFAULT_CHECKPOINT: &str = "charsiu/g2p_multilingual_byT5_tiny_8_layers_100";
 
@@ -28,6 +28,8 @@ pub struct G2pModelConfig {
     pub device_id: i32,
     pub tokenizer_root: Option<String>,
     pub tvm_root: Option<String>,
+    pub use_system_lib: bool,
+    pub system_lib_prefix: Option<String>,
 }
 
 impl Default for G2pModelConfig {
@@ -45,6 +47,8 @@ impl Default for G2pModelConfig {
             device_id: 0,
             tokenizer_root: None,
             tvm_root: None,
+            use_system_lib: false,
+            system_lib_prefix: None,
         }
     }
 }
@@ -199,7 +203,6 @@ pub fn g2p_model_new(config: G2pModelConfig) -> Result<G2pModel, G2pFfiError> {
             ),
         ));
     }
-    let artifacts = resolver.resolve_tvm_artifacts(&spec, config.tvm_ext.as_deref(), config.use_kv_cache)?;
 
     let device_name = config
         .device
@@ -218,7 +221,28 @@ pub fn g2p_model_new(config: G2pModelConfig) -> Result<G2pModel, G2pFfiError> {
         space_after_colon: false,
     };
     let pipeline_config = PipelineConfig::from_core(&core_config, batch_size, None, config.use_kv_cache, device);
-    let pipeline = G2pPipeline::load(tokenizer_metadata_path, artifacts, pipeline_config)?;
+    let pipeline = if config.use_system_lib {
+        // System-lib path: resolve prefixes (from metadata or manual config) and load statically
+        let prefixes = match resolver.resolve_system_lib_prefixes(&spec) {
+            Ok(p) => p,
+            Err(err) => {
+                // If metadata missing, try manual prefix
+                if let Some(prefix) = config.system_lib_prefix.as_deref().filter(|s| !s.is_empty()) {
+                    SystemLibPrefixes::new(prefix, config.use_kv_cache)
+                } else {
+                    return Err(G2pFfiError::new(
+                        G2pErrorKind::Artifact,
+                        format!("Failed to resolve system-lib prefixes: {err}"),
+                    ));
+                }
+            }
+        };
+        G2pPipeline::load_system_lib(tokenizer_metadata_path, prefixes, pipeline_config)?
+    } else {
+        // Original dynamic path
+        let artifacts = resolver.resolve_tvm_artifacts(&spec, config.tvm_ext.as_deref(), config.use_kv_cache)?;
+        G2pPipeline::load(tokenizer_metadata_path, artifacts, pipeline_config)?
+    };
 
     Ok(G2pModel {
         pipeline: Mutex::new(pipeline),
