@@ -27,6 +27,7 @@ from charsiug2p_tvm.eval import evaluate_against_reference, prepare_samples
 from charsiug2p_tvm.misaki_analysis import (
     analyze_misaki_english,
     build_stress_prefix_report,
+    build_mode_substitution_report,
     filter_samples_by_mode,
     write_analysis_csv,
 )
@@ -677,7 +678,9 @@ def analyze_misaki(
         "--strategy",
         help=(
             "Mapping strategy (espeak, ipa, ipa-flap, ipa-vowel, ipa-flap-vowel, "
-            "ipa-vowel-stress, ipa-flap-vowel-stress). Repeatable or comma-separated."
+            "ipa-vowel-stress, ipa-flap-vowel-stress, ipa-vowel-syllabic, "
+            "ipa-flap-vowel-syllabic, ipa-vowel-reduced, ipa-flap-vowel-reduced). "
+            "Repeatable or comma-separated. Recommended: ipa-flap-vowel-reduced."
         ),
     ),
     limit: int | None = typer.Option(None, help="Limit number of words evaluated."),
@@ -708,6 +711,26 @@ def analyze_misaki(
         12,
         "--stress-prefix-limit",
         help="Max prefixes to display in the stress prefix summary.",
+    ),
+    mode_sub_report: bool = typer.Option(
+        False,
+        "--mode-sub-report",
+        help="Show substitution summary for selected failure modes.",
+    ),
+    mode_sub_modes: list[str] | None = typer.Option(
+        None,
+        "--mode-sub-modes",
+        help="Comma-separated or repeatable list of modes for the substitution summary.",
+    ),
+    mode_sub_primary: bool = typer.Option(
+        False,
+        "--mode-sub-primary",
+        help="Only include samples where the target mode is the primary mode.",
+    ),
+    mode_sub_limit: int = typer.Option(
+        10,
+        "--mode-sub-limit",
+        help="Max substitution pairs to display per mode.",
     ),
     sample_strategy: str | None = typer.Option(
         None,
@@ -747,13 +770,17 @@ def analyze_misaki(
         parsed_strategies = _parse_multi(strategies)
     if not parsed_strategies:
         parsed_strategies = ["espeak", "ipa"]
-    experimental_strategies = {"ipa-vowel-prefix", "ipa-flap-vowel-prefix"}
+    experimental_strategies = {
+        "ipa-vowel-prefix",
+        "ipa-flap-vowel-prefix",
+        "ipa-vowel-syllabic",
+        "ipa-flap-vowel-syllabic",
+    }
     if experimental_strategies.intersection(parsed_strategies):
-        console.print(
-            "[yellow]Warning:[/yellow] prefix-based stress strategies are experimental and currently underperform."
-        )
+        console.print("[yellow]Warning:[/yellow] experimental strategies are in use.")
     parsed_sample_modes = _parse_multi(sample_mode)
     parsed_sample_primary = _parse_multi(sample_primary)
+    parsed_mode_sub_modes = _parse_multi(mode_sub_modes)
     wants_sample_filter = bool(parsed_sample_modes or parsed_sample_primary)
     if wants_sample_filter and output_csv is None:
         raise typer.BadParameter("--sample-mode/--sample-primary require --output-csv.")
@@ -776,7 +803,7 @@ def analyze_misaki(
         seed=seed,
         device=device,
         batch_size=batch_size,
-        include_samples=output_csv is not None or stress_prefix_report,
+        include_samples=output_csv is not None or stress_prefix_report or mode_sub_report,
     )
 
     console.print(
@@ -889,6 +916,34 @@ def analyze_misaki(
                     str(metric.extra_initial_secondary),
                 )
             console.print(prefix_table)
+
+    if mode_sub_report:
+        if report.samples is None:
+            raise typer.BadParameter("No samples available for mode substitution report.")
+        if not parsed_mode_sub_modes:
+            raise typer.BadParameter("--mode-sub-report requires --mode-sub-modes.")
+        for strategy in report.strategies:
+            sub_reports = build_mode_substitution_report(
+                report.samples,
+                strategy=strategy,
+                target_modes=parsed_mode_sub_modes,
+                primary_only=mode_sub_primary,
+                limit=abs(mode_sub_limit),
+            )
+            if not sub_reports:
+                continue
+            for report_entry in sub_reports:
+                table = Table(
+                    title=f"Substitutions ({strategy}, {report_entry.mode})",
+                    show_header=True,
+                    header_style="bold",
+                )
+                table.add_column("Ref", style="cyan")
+                table.add_column("Hyp", style="white")
+                table.add_column("Count", style="white", justify="right")
+                for old, new, count in report_entry.substitutions:
+                    table.add_row(old, new, str(count))
+                console.print(table)
 
     if output_csv is not None:
         if report.samples is None:

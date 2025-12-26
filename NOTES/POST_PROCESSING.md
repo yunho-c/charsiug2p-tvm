@@ -27,6 +27,10 @@ This note captures what we learned while mapping CharsiuG2P IPA output into Misa
 - `ipa-flap-vowel-stress`: Combines `ipa-vowel-stress` with the flapping heuristic.
 - `ipa-vowel-prefix` (experimental): Adds prefix-aware stress rules on top of `ipa-vowel`. If a prefixed word has exactly one primary and one secondary stress but the primary appears before the secondary, the stresses are swapped. For short prefixes (`re/un/in/im/il/ir`), an initial `ˌ` is dropped when there is only one secondary stress marker. Current results show this underperforms, so it is not recommended for default comparisons.
 - `ipa-flap-vowel-prefix` (experimental): Combines `ipa-vowel-prefix` with the flapping heuristic. Also underperforms relative to `ipa-flap-vowel`.
+- `ipa-vowel-syllabic` (experimental): Uses the same vowel tuning as `ipa-vowel`, but swaps in a context-sensitive `ə + l/n → ᵊl/ᵊn` rule that only fires after consonants and before consonants. This avoids over-converting sequences like `əlo`.
+- `ipa-flap-vowel-syllabic` (experimental): Combines `ipa-vowel-syllabic` with the flapping heuristic.
+- `ipa-vowel-reduced`: Adds a conservative pretonic reduction rule (`ɪ → ə`) in consonant contexts when a primary stress appears later in the word.
+- `ipa-flap-vowel-reduced`: Combines `ipa-vowel-reduced` with the flapping heuristic. This is currently the best-performing strategy (English) and is recommended for comparisons.
 
 ## Implementation pointers
 
@@ -49,6 +53,7 @@ This note captures what we learned while mapping CharsiuG2P IPA output into Misa
 
 - Run `analyze-misaki` with `--strategy espeak,ipa,ipa-flap` on a larger sample to see if the additional IPA rewrites help consistently.
 - Add optional toggles for individual IPA rewrites (dark-L, diphthongs, syllabic consonants) to isolate which changes help or hurt.
+- Use `--mode-sub-report --mode-sub-modes syllabic_schwa,reduced_vowel` to inspect the dominant substitution pairs and guide heuristics.
 
 ## Context and implementation plan (diff-based mode tagging)
 

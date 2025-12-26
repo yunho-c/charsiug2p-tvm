@@ -74,6 +74,13 @@ class StressPrefixMetrics:
     extra_initial_secondary: int
 
 
+@dataclass(frozen=True)
+class ModeSubstitutionMetrics:
+    mode: str
+    total: int
+    substitutions: list[tuple[str, str, int]]
+
+
 def _grow_dictionary(entries: dict[str, object]) -> dict[str, object]:
     expanded: dict[str, object] = {}
     for key, value in entries.items():
@@ -662,3 +669,54 @@ def build_stress_prefix_report(
             )
         )
     return sorted(metrics, key=lambda item: item.primary_total, reverse=True)
+
+
+def _token_substitutions(ref: str, hyp: str) -> list[tuple[str, str]]:
+    ops = _edit_ops(_tokenize_phonemes(ref), _tokenize_phonemes(hyp))
+    return [(old, new) for op, old, new in ops if op == "sub"]
+
+
+def build_mode_substitution_report(
+    samples: Sequence[AnalysisSample],
+    *,
+    strategy: str,
+    target_modes: Sequence[str],
+    primary_only: bool,
+    limit: int,
+) -> list[ModeSubstitutionMetrics]:
+    normalized_strategy = normalize_strategy(strategy)
+    mode_set = {mode.strip() for mode in target_modes if mode.strip()}
+    if not mode_set:
+        return []
+    substitution_counts: dict[str, dict[tuple[str, str], int]] = {mode: {} for mode in mode_set}
+
+    for sample in samples:
+        hyp = sample.mapped_stress_by_strategy.get(normalized_strategy)
+        if hyp is None:
+            raise ValueError(f"Missing mapped output for strategy: {normalized_strategy}")
+        tags = classify_failure_modes(sample.misaki, hyp)
+        if not tags:
+            tags = {"match"}
+        primary = "match" if tags == {"match"} else pick_primary_mode(tags)
+        if primary_only and primary not in mode_set:
+            continue
+        if not primary_only and not (tags & mode_set):
+            continue
+
+        for old, new in _token_substitutions(sample.misaki, hyp):
+            for mode in mode_set:
+                if mode == "syllabic_schwa":
+                    if {old, new} & {"ᵊ", "ᵊl", "ᵊn", "ᵊm", "əl", "ən", "əm"}:
+                        substitution_counts[mode][(old, new)] = substitution_counts[mode].get((old, new), 0) + 1
+                elif mode == "reduced_vowel":
+                    if {old, new} & {"ə", "ɜ", "ɪ", "ʌ", "ᵻ", "i"}:
+                        substitution_counts[mode][(old, new)] = substitution_counts[mode].get((old, new), 0) + 1
+                else:
+                    substitution_counts[mode][(old, new)] = substitution_counts[mode].get((old, new), 0) + 1
+
+    reports: list[ModeSubstitutionMetrics] = []
+    for mode, counts in substitution_counts.items():
+        ordered = sorted(((old, new, count) for (old, new), count in counts.items()), key=lambda item: item[2], reverse=True)
+        total = sum(count for _, _, count in ordered)
+        reports.append(ModeSubstitutionMetrics(mode=mode, total=total, substitutions=ordered[:limit]))
+    return reports

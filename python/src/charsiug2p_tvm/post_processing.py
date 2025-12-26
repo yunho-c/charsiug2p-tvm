@@ -8,6 +8,10 @@ SUPPORTED_STRATEGIES = {
     "ipa-flap-vowel",
     "ipa-vowel-stress",
     "ipa-flap-vowel-stress",
+    "ipa-vowel-syllabic",
+    "ipa-flap-vowel-syllabic",
+    "ipa-vowel-reduced",
+    "ipa-flap-vowel-reduced",
     "ipa-vowel-prefix",
     "ipa-flap-vowel-prefix",
 }
@@ -100,6 +104,22 @@ _IPA_REWRITES_VOWEL = sorted(
     key=lambda kv: -len(kv[0]),
 )
 
+_IPA_REWRITES_VOWEL_SYLLABIC = sorted(
+    {
+        "tʃ": "t^ʃ",
+        "dʒ": "d^ʒ",
+        "oʊ": "o^ʊ",
+        "əʊ": "ə^ʊ",
+        "aɪ": "a^ɪ",
+        "aʊ": "a^ʊ",
+        "eɪ": "e^ɪ",
+        "ɔɪ": "ɔ^ɪ",
+        "ɝ": "ɜɹ",
+        "ɫ": "l",
+    }.items(),
+    key=lambda kv: -len(kv[0]),
+)
+
 _IPA_STRATEGIES = {
     "ipa",
     "ipa-flap",
@@ -107,6 +127,10 @@ _IPA_STRATEGIES = {
     "ipa-flap-vowel",
     "ipa-vowel-stress",
     "ipa-flap-vowel-stress",
+    "ipa-vowel-syllabic",
+    "ipa-flap-vowel-syllabic",
+    "ipa-vowel-reduced",
+    "ipa-flap-vowel-reduced",
     "ipa-vowel-prefix",
     "ipa-flap-vowel-prefix",
 }
@@ -115,12 +139,24 @@ _VOWEL_TUNED_STRATEGIES = {
     "ipa-flap-vowel",
     "ipa-vowel-stress",
     "ipa-flap-vowel-stress",
+    "ipa-vowel-syllabic",
+    "ipa-flap-vowel-syllabic",
+    "ipa-vowel-reduced",
+    "ipa-flap-vowel-reduced",
     "ipa-vowel-prefix",
     "ipa-flap-vowel-prefix",
 }
 _STRESS_TUNED_STRATEGIES = {"ipa-vowel-stress", "ipa-flap-vowel-stress"}
+_SYLLABIC_TUNED_STRATEGIES = {"ipa-vowel-syllabic", "ipa-flap-vowel-syllabic"}
+_REDUCED_TUNED_STRATEGIES = {"ipa-vowel-reduced", "ipa-flap-vowel-reduced"}
 _PREFIX_STRESS_STRATEGIES = {"ipa-vowel-prefix", "ipa-flap-vowel-prefix"}
-_FLAP_STRATEGIES = {"ipa-flap", "ipa-flap-vowel", "ipa-flap-vowel-stress"}
+_FLAP_STRATEGIES = {
+    "ipa-flap",
+    "ipa-flap-vowel",
+    "ipa-flap-vowel-stress",
+    "ipa-flap-vowel-syllabic",
+    "ipa-flap-vowel-reduced",
+}
 _STRESS_MARKERS = {"ˈ", "ˌ"}
 _STRESS_TOKEN_UNITS = ["ᵊl", "ᵊn", "ᵊm", "ɜɹ", "əɹ"]
 _REDUCED_STRESS_VOWELS = {"ɪ", "ᵻ", "ə", "ᵊ"}
@@ -167,12 +203,26 @@ def normalize_strategy(strategy: str) -> str:
         has_vowel = "vowel" in parts or "vowels" in parts
         has_stress = "stress" in parts or "stresses" in parts
         has_prefix = "prefix" in parts or "pref" in parts
+        has_syllabic = "syllabic" in parts or "schwa" in parts
+        has_reduced = "reduced" in parts or "reduce" in parts
         if has_prefix:
+            has_vowel = True
+        if has_syllabic:
+            has_vowel = True
+        if has_reduced:
             has_vowel = True
         if has_flap and has_vowel and has_stress:
             normalized = "ipa-flap-vowel-stress"
         elif has_vowel and has_stress:
             normalized = "ipa-vowel-stress"
+        elif has_flap and has_syllabic:
+            normalized = "ipa-flap-vowel-syllabic"
+        elif has_syllabic:
+            normalized = "ipa-vowel-syllabic"
+        elif has_flap and has_reduced:
+            normalized = "ipa-flap-vowel-reduced"
+        elif has_reduced:
+            normalized = "ipa-vowel-reduced"
         elif has_flap and has_prefix:
             normalized = "ipa-flap-vowel-prefix"
         elif has_prefix:
@@ -405,11 +455,52 @@ def _apply_vowel_tuning(text: str) -> str:
     return "".join(result)
 
 
+def _apply_syllabic_tuning(text: str) -> str:
+    result: list[str] = []
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if char == "ə":
+            next_char = text[i + 1] if i + 1 < len(text) else ""
+            if next_char in {"l", "n"}:
+                prev_char = text[i - 1] if i > 0 else ""
+                next_next = text[i + 2] if i + 2 < len(text) else ""
+                prev_is_vowel = prev_char in _VOWELS
+                next_is_vowel = next_next in _VOWELS or next_next in {"ˈ", "ˌ", "o", "e"}
+                if prev_char and not prev_is_vowel and not next_is_vowel:
+                    result.append(f"ᵊ{next_char}")
+                    i += 2
+                    continue
+        result.append(char)
+        i += 1
+    return "".join(result)
+
+
+def _apply_reduced_vowel_tuning(text: str) -> str:
+    result: list[str] = []
+    for i, char in enumerate(text):
+        if char == "ɪ":
+            prev_char = text[i - 1] if i > 0 else ""
+            next_char = text[i + 1] if i + 1 < len(text) else ""
+            if prev_char in {"ˈ", "ˌ"}:
+                result.append(char)
+                continue
+            if "ˈ" in text[i + 1 :] and prev_char and prev_char not in _VOWELS:
+                if next_char and next_char not in _VOWELS and next_char not in {"ˈ", "ˌ", "ŋ"}:
+                    result.append("ə")
+                    continue
+        result.append(char)
+    return "".join(result)
+
+
 def espeak_ipa_to_misaki(ipa: str, *, british: bool, strategy: str = "espeak", word: str | None = None) -> str:
     strategy = normalize_strategy(strategy)
     result = ipa
     if strategy in _IPA_STRATEGIES:
-        rewrites = _IPA_REWRITES_VOWEL if strategy in _VOWEL_TUNED_STRATEGIES else _IPA_REWRITES_BASE
+        if strategy in _SYLLABIC_TUNED_STRATEGIES:
+            rewrites = _IPA_REWRITES_VOWEL_SYLLABIC
+        else:
+            rewrites = _IPA_REWRITES_VOWEL if strategy in _VOWEL_TUNED_STRATEGIES else _IPA_REWRITES_BASE
         result = _apply_ipa_rewrites(result, rewrites)
     result = result.replace("\u0361", "^")
     for old, new in _FROM_ESPEAKS:
@@ -428,6 +519,10 @@ def espeak_ipa_to_misaki(ipa: str, *, british: bool, strategy: str = "espeak", w
     result = result.replace("^", "")
     if strategy in _VOWEL_TUNED_STRATEGIES:
         result = _apply_vowel_tuning(result)
+    if strategy in _SYLLABIC_TUNED_STRATEGIES:
+        result = _apply_syllabic_tuning(result)
+    if strategy in _REDUCED_TUNED_STRATEGIES:
+        result = _apply_reduced_vowel_tuning(result)
     if strategy in _PREFIX_STRESS_STRATEGIES:
         result = _apply_prefix_stress_rules(result, word)
     if strategy in _STRESS_TUNED_STRATEGIES:
