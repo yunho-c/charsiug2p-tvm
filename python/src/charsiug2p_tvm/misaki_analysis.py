@@ -15,6 +15,8 @@ from charsiug2p_tvm.post_processing import (
     normalize_strategy,
 )
 
+_STRESS_TRANSLATION = str.maketrans("", "", "ˈˌ")
+
 
 @dataclass(frozen=True)
 class AnalysisSample:
@@ -34,12 +36,22 @@ class MappingMetrics:
 
 
 @dataclass(frozen=True)
+class FailureModeMetrics:
+    name: str
+    total: int
+    exact_match: int
+    exact_match_rate: float
+    cer: float
+
+
+@dataclass(frozen=True)
 class AnalysisReport:
     total: int
     dataset_words: int
     lexicon_words: int
     strategies: list[str]
     metrics: list[MappingMetrics]
+    mode_metrics_by_strategy: dict[str, list[FailureModeMetrics]]
     samples: list[AnalysisSample] | None
 
 
@@ -133,6 +145,50 @@ def _cer(ref: str, hyp: str) -> float:
     if not ref:
         return 0.0 if not hyp else 1.0
     return _edit_distance(ref, hyp) / len(ref)
+
+
+def _strip_stress(text: str) -> str:
+    return text.translate(_STRESS_TRANSLATION)
+
+
+def _contains_any(text: str, tokens: Sequence[str]) -> bool:
+    return any(token in text for token in tokens)
+
+
+def classify_failure_modes(ref: str, hyp: str) -> set[str]:
+    if ref == hyp:
+        return set()
+
+    tags: set[str] = set()
+
+    ref_no_stress = _strip_stress(ref)
+    hyp_no_stress = _strip_stress(hyp)
+    if ref_no_stress == hyp_no_stress:
+        tags.add("stress_only")
+    elif _contains_any(ref, ("ˈ", "ˌ")) or _contains_any(hyp, ("ˈ", "ˌ")):
+        tags.add("stress_mismatch")
+
+    if _contains_any(ref, ("ᵊ",)) or _contains_any(hyp, ("ᵊ",)):
+        tags.add("syllabic_schwa")
+
+    if _contains_any(ref, ("ɝ", "ɚ", "ɜɹ", "əɹ")) or _contains_any(hyp, ("ɝ", "ɚ", "ɜɹ", "əɹ")):
+        tags.add("rhotic_vowel")
+
+    if _contains_any(ref, ("A", "I", "W", "O", "Y", "Q")) or _contains_any(hyp, ("A", "I", "W", "O", "Y", "Q")):
+        tags.add("diphthong_token")
+
+    if _contains_any(ref, ("ʧ", "ʤ")) or _contains_any(hyp, ("ʧ", "ʤ")):
+        tags.add("affricate_token")
+
+    if _contains_any(ref, ("ɾ",)) or _contains_any(hyp, ("ɾ",)):
+        tags.add("flap")
+
+    if _contains_any(ref, ("ə", "ɜ", "ɪ", "ʌ", "ᵻ", "i")) or _contains_any(hyp, ("ə", "ɜ", "ɪ", "ʌ", "ᵻ", "i")):
+        tags.add("reduced_vowel")
+
+    if not tags:
+        tags.add("other")
+    return tags
 
 
 def _resolve_words(
@@ -243,12 +299,42 @@ def analyze_misaki_english(
                 )
             )
 
+    mode_metrics_by_strategy: dict[str, list[FailureModeMetrics]] = {}
+    for strategy in normalized_strategies:
+        mode_counts: dict[str, dict[str, float]] = {}
+        for ref, hyp in zip(misaki_outputs, mapped_stress_outputs[strategy]):
+            tags = classify_failure_modes(ref, hyp)
+            if not tags:
+                continue
+            cer = _cer(ref, hyp)
+            for tag in tags:
+                stats = mode_counts.setdefault(tag, {"total": 0.0, "exact": 0.0, "cer": 0.0})
+                stats["total"] += 1.0
+                stats["exact"] += 1.0 if ref == hyp else 0.0
+                stats["cer"] += cer
+        mode_metrics: list[FailureModeMetrics] = []
+        for tag, stats in mode_counts.items():
+            total = int(stats["total"])
+            exact = int(stats["exact"])
+            cer = stats["cer"] / total if total else 0.0
+            mode_metrics.append(
+                FailureModeMetrics(
+                    name=tag,
+                    total=total,
+                    exact_match=exact,
+                    exact_match_rate=exact / total if total else 0.0,
+                    cer=cer,
+                )
+            )
+        mode_metrics_by_strategy[strategy] = sorted(mode_metrics, key=lambda metric: metric.total, reverse=True)
+
     return AnalysisReport(
         total=total,
         dataset_words=len(dataset),
         lexicon_words=len(lexicon),
         strategies=normalized_strategies,
         metrics=metrics,
+        mode_metrics_by_strategy=mode_metrics_by_strategy,
         samples=samples if include_samples else None,
     )
 

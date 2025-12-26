@@ -677,6 +677,10 @@ def analyze_misaki(
     seed: int | None = typer.Option(None, help="Shuffle seed."),
     device: str = typer.Option("cpu", help="Torch device used for source=model."),
     batch_size: int = typer.Option(8, help="Batch size for source=model inference."),
+    mode_limit: int = typer.Option(
+        10,
+        help="Max failure modes to display per strategy (0 to hide).",
+    ),
     output_csv: Path | None = typer.Option(None, "--output-csv", help="Write per-word results to CSV."),
 ) -> None:
     source = source.lower().strip()
@@ -728,6 +732,29 @@ def analyze_misaki(
             f"{metric.cer:.4f}",
         )
     console.print(table)
+
+    if mode_limit != 0:
+        for strategy in report.strategies:
+            mode_metrics = report.mode_metrics_by_strategy.get(strategy, [])
+            if not mode_metrics:
+                continue
+            mode_table = Table(
+                title=f"Failure Modes ({strategy}, mapped+stress)",
+                show_header=True,
+                header_style="bold",
+            )
+            mode_table.add_column("Mode", style="cyan")
+            mode_table.add_column("Samples", style="white", justify="right")
+            mode_table.add_column("Exact match", style="white", justify="right")
+            mode_table.add_column("CER", style="white", justify="right")
+            for metric in mode_metrics[: abs(mode_limit)]:
+                mode_table.add_row(
+                    metric.name,
+                    str(metric.total),
+                    f"{metric.exact_match} ({metric.exact_match_rate:.2%})",
+                    f"{metric.cer:.4f}",
+                )
+            console.print(mode_table)
 
     if output_csv is not None:
         if report.samples is None:
