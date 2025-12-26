@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -27,10 +26,9 @@ class CharsiuG2pAssets {
     final normalizedSkips = skipPrefixes
         .map((prefix) => _normalizeSubdir(prefix))
         .toList(growable: false);
-    final manifest = await rootBundle.loadString('AssetManifest.json');
-    final Map<String, dynamic> entries =
-        jsonDecode(manifest) as Map<String, dynamic>;
-    final assetKeys = entries.keys
+    final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+    final assetKeys = manifest
+        .listAssets()
         .where((key) => key.startsWith(normalizedPrefix))
         .where((key) => !_isSkipped(normalizedPrefix, key, normalizedSkips))
         .toList()
