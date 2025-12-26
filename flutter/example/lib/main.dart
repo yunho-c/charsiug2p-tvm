@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:charsiug2p_flutter/charsiug2p_flutter.dart';
 
 Future<void> main() async {
@@ -271,8 +272,50 @@ class _G2pHomeState extends State<G2pHome> {
             Text('Output:', style: Theme.of(context).textTheme.titleMedium),
             Text(_result),
           ],
+          const SizedBox(height: 16),
+          TextButton.icon(
+            onPressed: _debugAssets,
+            icon: const Icon(Icons.bug_report),
+            label: const Text('Debug Assets (List all)'),
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _debugAssets() async {
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final assets = manifest.listAssets().toList()..sort();
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('AssetManifest'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                itemCount: assets.length,
+                itemBuilder: (context, index) {
+                  return SelectableText(assets[index]);
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load manifest: $e')),
+      );
+    }
   }
 }
