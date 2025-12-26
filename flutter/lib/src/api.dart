@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `default_device_for_target`, `default_target_for_platform`, `is_byt5_metadata`, `new`, `normalize_non_empty`, `validate_positive`, `with_details`
+// These functions are ignored because they are not marked as `pub`: `default_device_for_target`, `default_target_for_platform`, `is_byt5_metadata`, `new`, `normalize_non_empty`, `parse_post_process_option`, `validate_positive`, `with_details`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`
 
 Future<G2pPlatformDefaults> g2PPlatformDefaults() =>
@@ -79,6 +79,8 @@ class G2pModelConfig {
   final String? tvmRoot;
   final bool useSystemLib;
   final String? systemLibPrefix;
+  final String? postProcess;
+  final bool postProcessBritish;
 
   const G2pModelConfig({
     required this.assetRoot,
@@ -95,6 +97,8 @@ class G2pModelConfig {
     this.tvmRoot,
     required this.useSystemLib,
     this.systemLibPrefix,
+    this.postProcess,
+    required this.postProcessBritish,
   });
 
   static Future<G2pModelConfig> default_() =>
@@ -115,7 +119,9 @@ class G2pModelConfig {
       tokenizerRoot.hashCode ^
       tvmRoot.hashCode ^
       useSystemLib.hashCode ^
-      systemLibPrefix.hashCode;
+      systemLibPrefix.hashCode ^
+      postProcess.hashCode ^
+      postProcessBritish.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -135,7 +141,9 @@ class G2pModelConfig {
           tokenizerRoot == other.tokenizerRoot &&
           tvmRoot == other.tvmRoot &&
           useSystemLib == other.useSystemLib &&
-          systemLibPrefix == other.systemLibPrefix;
+          systemLibPrefix == other.systemLibPrefix &&
+          postProcess == other.postProcess &&
+          postProcessBritish == other.postProcessBritish;
 }
 
 class G2pPlatformDefaults {

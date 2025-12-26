@@ -51,7 +51,7 @@ impl Default for G2pModelConfig {
             tvm_root: None,
             use_system_lib: false,
             system_lib_prefix: None,
-            post_process: None,
+            post_process: Some("ipa-flap-vowel-reduced".to_string()),
             post_process_british: false,
         }
     }
