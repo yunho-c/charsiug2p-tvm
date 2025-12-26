@@ -24,6 +24,13 @@ from charsiug2p_tvm.tvm_runtime import (
     tvm_g2p_multi,
 )
 from charsiug2p_tvm.eval import evaluate_against_reference, prepare_samples
+from charsiug2p_tvm.misaki_analysis import (
+    analyze_misaki_english,
+    build_stress_prefix_report,
+    build_mode_substitution_report,
+    filter_samples_by_mode,
+    write_analysis_csv,
+)
 from charsiug2p_tvm.profile import parse_targets, profile_targets, write_profile_csv
 from charsiug2p_tvm.tokenizer_export import default_tokenizer_export_dir, export_tokenizer_assets
 
@@ -642,6 +649,321 @@ def profile_tvm(
 
     write_profile_csv(output_file, results)
     console.print(f"[green]Saved CSV to {output_file}[/green]")
+
+
+@app.command("analyze-misaki")
+def analyze_misaki(
+    lang: str = typer.Option("eng-us", help="Language code for CharsiuG2P inference."),
+    charsiu_path: Path = typer.Option(
+        Path("external/CharsiuG2P/data/train/eng-us.tsv"),
+        "--charsiu-path",
+        help="CharsiuG2P TSV (word\\tipa) to use for candidate words.",
+    ),
+    misaki_root: Path = typer.Option(
+        Path("external/misaki"),
+        "--misaki-root",
+        help="Misaki repository root (expects misaki/data/*_gold.json).",
+    ),
+    british: bool = typer.Option(False, "--british/--american", help="Use GB lexicon/mapping."),
+    source: str = typer.Option(
+        "dataset",
+        help="IPA source: dataset (tsv pronunciations) or model (CharsiuG2P inference).",
+    ),
+    scope: str = typer.Option(
+        "intersection",
+        help="Word scope: intersection (dataset with misaki lexicon) or misaki (lexicon only).",
+    ),
+    strategies: list[str] | None = typer.Option(
+        None,
+        "--strategy",
+        help=(
+            "Mapping strategy (espeak, ipa, ipa-flap, ipa-vowel, ipa-flap-vowel, "
+            "ipa-vowel-stress, ipa-flap-vowel-stress, ipa-vowel-syllabic, "
+            "ipa-flap-vowel-syllabic, ipa-vowel-reduced, ipa-flap-vowel-reduced, "
+            "ipa-vowel-reduced-rhotic, ipa-flap-vowel-reduced-rhotic). "
+            "Repeatable or comma-separated. Recommended: ipa-flap-vowel-reduced."
+        ),
+    ),
+    limit: int | None = typer.Option(None, help="Limit number of words evaluated."),
+    shuffle: bool = typer.Option(False, help="Shuffle word list before limiting."),
+    seed: int | None = typer.Option(None, help="Shuffle seed."),
+    device: str = typer.Option("cpu", help="Torch device used for source=model."),
+    batch_size: int = typer.Option(8, help="Batch size for source=model inference."),
+    mode_limit: int = typer.Option(
+        10,
+        help="Max failure modes to display per strategy (0 to hide).",
+    ),
+    coverage_limit: int = typer.Option(
+        10,
+        help="Max coverage modes to display per strategy (0 to hide).",
+    ),
+    primary_limit: int = typer.Option(
+        10,
+        help="Max primary-mode rows to display per strategy (0 to hide).",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", help="Show extra columns in mode tables."),
+    output_csv: Path | None = typer.Option(None, "--output-csv", help="Write per-word results to CSV."),
+    stress_prefix_report: bool = typer.Option(
+        False,
+        "--stress-prefix-report",
+        help="Show prefix summary for stress mismatches.",
+    ),
+    stress_prefix_limit: int = typer.Option(
+        12,
+        "--stress-prefix-limit",
+        help="Max prefixes to display in the stress prefix summary.",
+    ),
+    mode_sub_report: bool = typer.Option(
+        False,
+        "--mode-sub-report",
+        help="Show substitution summary for selected failure modes.",
+    ),
+    mode_sub_modes: list[str] | None = typer.Option(
+        None,
+        "--mode-sub-modes",
+        help="Comma-separated or repeatable list of modes for the substitution summary.",
+    ),
+    mode_sub_primary: bool = typer.Option(
+        False,
+        "--mode-sub-primary",
+        help="Only include samples where the target mode is the primary mode.",
+    ),
+    mode_sub_limit: int = typer.Option(
+        10,
+        "--mode-sub-limit",
+        help="Max substitution pairs to display per mode.",
+    ),
+    sample_strategy: str | None = typer.Option(
+        None,
+        "--sample-strategy",
+        help="Strategy name to use for mode filtering when writing the CSV.",
+    ),
+    sample_mode: list[str] | None = typer.Option(
+        None,
+        "--sample-mode",
+        help="Filter CSV rows to samples tagged with these modes (repeatable or comma-separated).",
+    ),
+    sample_primary: list[str] | None = typer.Option(
+        None,
+        "--sample-primary",
+        help="Filter CSV rows to samples with these primary modes (repeatable or comma-separated).",
+    ),
+) -> None:
+    source = source.lower().strip()
+    scope = scope.lower().strip()
+    if source not in {"dataset", "model"}:
+        raise typer.BadParameter(f"Unsupported source: {source}")
+    if scope not in {"intersection", "misaki"}:
+        raise typer.BadParameter(f"Unsupported scope: {scope}")
+
+    def _parse_multi(values: list[str] | None) -> list[str]:
+        parsed: list[str] = []
+        if values:
+            for value in values:
+                for part in value.split(","):
+                    part = part.strip()
+                    if part:
+                        parsed.append(part)
+        return parsed
+
+    parsed_strategies: list[str] = []
+    if strategies:
+        parsed_strategies = _parse_multi(strategies)
+    if not parsed_strategies:
+        parsed_strategies = ["espeak", "ipa"]
+    experimental_strategies = {
+        "ipa-vowel-prefix",
+        "ipa-flap-vowel-prefix",
+        "ipa-vowel-syllabic",
+        "ipa-flap-vowel-syllabic",
+        "ipa-vowel-reduced-rhotic",
+        "ipa-flap-vowel-reduced-rhotic",
+    }
+    if experimental_strategies.intersection(parsed_strategies):
+        console.print("[yellow]Warning:[/yellow] experimental strategies are in use.")
+    parsed_sample_modes = _parse_multi(sample_mode)
+    parsed_sample_primary = _parse_multi(sample_primary)
+    parsed_mode_sub_modes = _parse_multi(mode_sub_modes)
+    wants_sample_filter = bool(parsed_sample_modes or parsed_sample_primary)
+    if wants_sample_filter and output_csv is None:
+        raise typer.BadParameter("--sample-mode/--sample-primary require --output-csv.")
+    if wants_sample_filter and sample_strategy is None:
+        if len(parsed_strategies) == 1:
+            sample_strategy = parsed_strategies[0]
+        else:
+            raise typer.BadParameter("--sample-strategy is required when filtering with multiple strategies.")
+
+    report = analyze_misaki_english(
+        charsiu_path=charsiu_path,
+        misaki_root=misaki_root,
+        lang=lang,
+        british=british,
+        source=source,
+        scope=scope,
+        strategies=parsed_strategies,
+        limit=limit,
+        shuffle=shuffle,
+        seed=seed,
+        device=device,
+        batch_size=batch_size,
+        include_samples=output_csv is not None or stress_prefix_report or mode_sub_report,
+    )
+
+    console.print(
+        f"[cyan]Dataset words:[/cyan] {report.dataset_words}  "
+        f"[cyan]Misaki lexicon:[/cyan] {report.lexicon_words}  "
+        f"[cyan]Evaluated:[/cyan] {report.total}"
+    )
+    table = Table(title="CharsiuG2P -> Misaki (English)", show_header=True, header_style="bold")
+    table.add_column("Variant", style="cyan")
+    table.add_column("Exact match", style="white", justify="right")
+    table.add_column("CER", style="white", justify="right")
+    for metric in report.metrics:
+        table.add_row(
+            metric.name,
+            f"{metric.exact_match} ({metric.exact_match_rate:.2%})",
+            f"{metric.cer:.4f}",
+        )
+    console.print(table)
+
+    if mode_limit != 0:
+        for strategy in report.strategies:
+            mode_metrics = report.mode_metrics_by_strategy.get(strategy, [])
+            if not mode_metrics:
+                continue
+            mode_table = Table(
+                title=f"Failure Modes ({strategy}, mapped+stress)",
+                show_header=True,
+                header_style="bold",
+            )
+            mode_table.add_column("Mode", style="cyan")
+            mode_table.add_column("Samples", style="white", justify="right")
+            if verbose:
+                mode_table.add_column("Exact match", style="white", justify="right")
+            mode_table.add_column("CER", style="white", justify="right")
+            for metric in mode_metrics[: abs(mode_limit)]:
+                row = [metric.name, str(metric.total)]
+                if verbose:
+                    row.append(f"{metric.exact_match} ({metric.exact_match_rate:.2%})")
+                row.append(f"{metric.cer:.4f}")
+                mode_table.add_row(*row)
+            console.print(mode_table)
+
+    if coverage_limit != 0:
+        for strategy in report.strategies:
+            coverage_metrics = report.mode_coverage_by_strategy.get(strategy, [])
+            if not coverage_metrics:
+                continue
+            coverage_table = Table(
+                title=f"Mode Coverage ({strategy}, mapped+stress)",
+                show_header=True,
+                header_style="bold",
+            )
+            coverage_table.add_column("Mode", style="cyan")
+            coverage_table.add_column("Samples", style="white", justify="right")
+            coverage_table.add_column("Rate", style="white", justify="right")
+            for metric in coverage_metrics[: abs(coverage_limit)]:
+                coverage_table.add_row(
+                    metric.name,
+                    str(metric.total),
+                    f"{metric.rate:.2%}",
+                )
+            console.print(coverage_table)
+
+    if primary_limit != 0:
+        for strategy in report.strategies:
+            primary_metrics = report.primary_mode_metrics_by_strategy.get(strategy, [])
+            if not primary_metrics:
+                continue
+            primary_table = Table(
+                title=f"Primary Mode ({strategy}, mapped+stress)",
+                show_header=True,
+                header_style="bold",
+            )
+            primary_table.add_column("Mode", style="cyan")
+            primary_table.add_column("Samples", style="white", justify="right")
+            if verbose:
+                primary_table.add_column("Exact match", style="white", justify="right")
+            primary_table.add_column("CER", style="white", justify="right")
+            for metric in primary_metrics[: abs(primary_limit)]:
+                row = [metric.name, str(metric.total)]
+                if verbose:
+                    row.append(f"{metric.exact_match} ({metric.exact_match_rate:.2%})")
+                row.append(f"{metric.cer:.4f}")
+                primary_table.add_row(*row)
+            console.print(primary_table)
+
+    if stress_prefix_report:
+        if report.samples is None:
+            raise typer.BadParameter("No samples available for prefix report.")
+        for strategy in report.strategies:
+            prefix_metrics = build_stress_prefix_report(report.samples, strategy=strategy)
+            if not prefix_metrics:
+                continue
+            prefix_table = Table(
+                title=f"Stress Prefix Summary ({strategy}, mapped+stress)",
+                show_header=True,
+                header_style="bold",
+            )
+            prefix_table.add_column("Prefix", style="cyan")
+            prefix_table.add_column("Any", style="white", justify="right")
+            prefix_table.add_column("Primary", style="white", justify="right")
+            prefix_table.add_column("Swap", style="white", justify="right")
+            prefix_table.add_column("Extra ˌ", style="white", justify="right")
+            for metric in prefix_metrics[: abs(stress_prefix_limit)]:
+                prefix_table.add_row(
+                    metric.prefix,
+                    str(metric.any_total),
+                    str(metric.primary_total),
+                    str(metric.swap_candidates),
+                    str(metric.extra_initial_secondary),
+                )
+            console.print(prefix_table)
+
+    if mode_sub_report:
+        if report.samples is None:
+            raise typer.BadParameter("No samples available for mode substitution report.")
+        if not parsed_mode_sub_modes:
+            raise typer.BadParameter("--mode-sub-report requires --mode-sub-modes.")
+        for strategy in report.strategies:
+            sub_reports = build_mode_substitution_report(
+                report.samples,
+                strategy=strategy,
+                target_modes=parsed_mode_sub_modes,
+                primary_only=mode_sub_primary,
+                limit=abs(mode_sub_limit),
+            )
+            if not sub_reports:
+                continue
+            for report_entry in sub_reports:
+                table = Table(
+                    title=f"Substitutions ({strategy}, {report_entry.mode})",
+                    show_header=True,
+                    header_style="bold",
+                )
+                table.add_column("Ref", style="cyan")
+                table.add_column("Hyp", style="white")
+                table.add_column("Count", style="white", justify="right")
+                for old, new, count in report_entry.substitutions:
+                    table.add_row(old, new, str(count))
+                console.print(table)
+
+    if output_csv is not None:
+        if report.samples is None:
+            raise typer.BadParameter("No samples available to write.")
+        samples = report.samples
+        if wants_sample_filter and sample_strategy is not None:
+            samples = filter_samples_by_mode(
+                samples,
+                strategy=sample_strategy,
+                modes=parsed_sample_modes,
+                primary_modes=parsed_sample_primary,
+            )
+        write_analysis_csv(output_csv, samples, report.strategies)
+        if wants_sample_filter:
+            console.print(f"[green]Saved {len(samples)} filtered samples to {output_csv}[/green]")
+        else:
+            console.print(f"[green]Saved CSV to {output_csv}[/green]")
 
 
 def cli() -> None:

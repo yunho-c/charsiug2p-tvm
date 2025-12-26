@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use charsiug2p_g2p_core::{G2pConfig, DEFAULT_MAX_INPUT_BYTES, DEFAULT_MAX_OUTPUT_LEN};
 use charsiug2p_g2p_pipeline::{
     ArtifactError, ArtifactResolver, ArtifactRoots, ArtifactSpec, G2pPipeline, PipelineConfig,
-    PipelineError,
+    PipelineError, PostProcessStrategy,
 };
 use charsiug2p_g2p_tokenizer::{load_tokenizer_metadata, TokenizerError, TokenizerMetadata};
 use charsiug2p_g2p_tvm::{DeviceConfig, SystemLibPrefixes, TvmError};
@@ -30,6 +30,8 @@ pub struct G2pModelConfig {
     pub tvm_root: Option<String>,
     pub use_system_lib: bool,
     pub system_lib_prefix: Option<String>,
+    pub post_process: Option<String>,
+    pub post_process_british: bool,
 }
 
 impl Default for G2pModelConfig {
@@ -49,6 +51,8 @@ impl Default for G2pModelConfig {
             tvm_root: None,
             use_system_lib: false,
             system_lib_prefix: None,
+            post_process: Some("ipa-flap-vowel-reduced".to_string()),
+            post_process_british: false,
         }
     }
 }
@@ -220,7 +224,9 @@ pub fn g2p_model_new(config: G2pModelConfig) -> Result<G2pModel, G2pFfiError> {
         max_output_len,
         space_after_colon: false,
     };
-    let pipeline_config = PipelineConfig::from_core(&core_config, batch_size, None, config.use_kv_cache, device);
+    let mut pipeline_config = PipelineConfig::from_core(&core_config, batch_size, None, config.use_kv_cache, device);
+    pipeline_config.post_process = parse_post_process_option(config.post_process.as_deref())?;
+    pipeline_config.post_process_british = config.post_process_british;
     let pipeline = if config.use_system_lib {
         // System-lib path: resolve prefixes (from metadata or manual config) and load statically
         let prefixes = match resolver.resolve_system_lib_prefixes(&spec) {
@@ -315,6 +321,22 @@ fn is_byt5_metadata(metadata: &TokenizerMetadata) -> bool {
         .tokenizer_name
         .to_ascii_lowercase()
         .contains("byt5")
+}
+
+fn parse_post_process_option(
+    value: Option<&str>,
+) -> Result<Option<PostProcessStrategy>, G2pFfiError> {
+    let trimmed = value.unwrap_or("").trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") || trimmed.eq_ignore_ascii_case("off") {
+        return Ok(None);
+    }
+    PostProcessStrategy::parse(trimmed).map(Some).map_err(|_| {
+        let variants = PostProcessStrategy::variants().join(", ");
+        G2pFfiError::new(
+            G2pErrorKind::Config,
+            format!("Unsupported post-process strategy: {trimmed}. Supported: none, {variants}."),
+        )
+    })
 }
 
 #[cfg(test)]

@@ -345,8 +345,8 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
   G2pModelConfig dco_decode_g_2_p_model_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 14)
-      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
+    if (arr.length != 16)
+      throw Exception('unexpected arr length: expect 16 but see ${arr.length}');
     return G2pModelConfig(
       assetRoot: dco_decode_String(arr[0]),
       checkpoint: dco_decode_String(arr[1]),
@@ -362,6 +362,8 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
       tvmRoot: dco_decode_opt_String(arr[11]),
       useSystemLib: dco_decode_bool(arr[12]),
       systemLibPrefix: dco_decode_opt_String(arr[13]),
+      postProcess: dco_decode_opt_String(arr[14]),
+      postProcessBritish: dco_decode_bool(arr[15]),
     );
   }
 
@@ -530,6 +532,8 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
     var var_tvmRoot = sse_decode_opt_String(deserializer);
     var var_useSystemLib = sse_decode_bool(deserializer);
     var var_systemLibPrefix = sse_decode_opt_String(deserializer);
+    var var_postProcess = sse_decode_opt_String(deserializer);
+    var var_postProcessBritish = sse_decode_bool(deserializer);
     return G2pModelConfig(
         assetRoot: var_assetRoot,
         checkpoint: var_checkpoint,
@@ -544,7 +548,9 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
         tokenizerRoot: var_tokenizerRoot,
         tvmRoot: var_tvmRoot,
         useSystemLib: var_useSystemLib,
-        systemLibPrefix: var_systemLibPrefix);
+        systemLibPrefix: var_systemLibPrefix,
+        postProcess: var_postProcess,
+        postProcessBritish: var_postProcessBritish);
   }
 
   @protected
@@ -720,6 +726,8 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
     sse_encode_opt_String(self.tvmRoot, serializer);
     sse_encode_bool(self.useSystemLib, serializer);
     sse_encode_opt_String(self.systemLibPrefix, serializer);
+    sse_encode_opt_String(self.postProcess, serializer);
+    sse_encode_bool(self.postProcessBritish, serializer);
   }
 
   @protected

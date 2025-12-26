@@ -356,6 +356,8 @@ impl SseDecode for crate::api::G2pModelConfig {
         let mut var_tvmRoot = <Option<String>>::sse_decode(deserializer);
         let mut var_useSystemLib = <bool>::sse_decode(deserializer);
         let mut var_systemLibPrefix = <Option<String>>::sse_decode(deserializer);
+        let mut var_postProcess = <Option<String>>::sse_decode(deserializer);
+        let mut var_postProcessBritish = <bool>::sse_decode(deserializer);
         return crate::api::G2pModelConfig {
             asset_root: var_assetRoot,
             checkpoint: var_checkpoint,
@@ -371,6 +373,8 @@ impl SseDecode for crate::api::G2pModelConfig {
             tvm_root: var_tvmRoot,
             use_system_lib: var_useSystemLib,
             system_lib_prefix: var_systemLibPrefix,
+            post_process: var_postProcess,
+            post_process_british: var_postProcessBritish,
         };
     }
 }
@@ -580,6 +584,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::G2pModelConfig {
             self.tvm_root.into_into_dart().into_dart(),
             self.use_system_lib.into_into_dart().into_dart(),
             self.system_lib_prefix.into_into_dart().into_dart(),
+            self.post_process.into_into_dart().into_dart(),
+            self.post_process_british.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -703,6 +709,8 @@ impl SseEncode for crate::api::G2pModelConfig {
         <Option<String>>::sse_encode(self.tvm_root, serializer);
         <bool>::sse_encode(self.use_system_lib, serializer);
         <Option<String>>::sse_encode(self.system_lib_prefix, serializer);
+        <Option<String>>::sse_encode(self.post_process, serializer);
+        <bool>::sse_encode(self.post_process_british, serializer);
     }
 }
 

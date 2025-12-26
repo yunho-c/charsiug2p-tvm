@@ -28,9 +28,13 @@ class CharsiuG2p {
     String? tvmRoot,
     bool? useSystemLib,
     String? systemLibPrefix,
+    String? postProcess,
+    bool? postProcessBritish,
   }) async {
     final defaults = await g2PPlatformDefaults();
     final base = await G2pModelConfig.default_();
+    final resolvedPostProcess =
+        postProcess ?? base.postProcess ?? 'ipa-flap-vowel-reduced';
     final config = G2pModelConfig(
       assetRoot: assetRoot,
       checkpoint: checkpoint ?? base.checkpoint,
@@ -46,6 +50,8 @@ class CharsiuG2p {
       tvmRoot: tvmRoot ?? base.tvmRoot,
       useSystemLib: useSystemLib ?? base.useSystemLib,
       systemLibPrefix: systemLibPrefix ?? base.systemLibPrefix,
+      postProcess: resolvedPostProcess,
+      postProcessBritish: postProcessBritish ?? base.postProcessBritish,
     );
     final model = await g2PModelNew(config: config);
     return CharsiuG2p._(model);
