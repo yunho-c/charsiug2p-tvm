@@ -16,30 +16,41 @@ fn main() {
     println!("cargo:rerun-if-env-changed=TVM_FFI_LINK_TESTING");
     println!("cargo:rerun-if-env-changed=TVM_STATIC_LINK");
     println!("cargo:rerun-if-env-changed=TVM_FFI_STATIC");
-    println!("cargo:rerun-if-env-changed=LINK_DIAGNOSTICS");
+    println!("cargo:rerun-if-env-changed=TVM_FFI_EXTERNAL");
 
-    emit_diag(
-        diagnostics,
-        format!(
-            "g2p_tvm build: target={target} ios={is_ios} static_link={static_requested}"
-        ),
-    );
+    // When TVM FFI is provided externally (e.g., by CocoaPods tvm_runtime_flutter),
+    // skip all TVM linking in Rust - the linker will resolve symbols later.
+    if env_flag("TVM_FFI_EXTERNAL") {
+        emit_diag(
+            diagnostics,
+            "g2p_tvm build: TVM_FFI_EXTERNAL=1, skipping TVM FFI linking (provided by CocoaPods)".to_string(),
+        );
+        return;
+    }
 
     let ffi_lib_dir = match env::var("TVM_FFI_LIB_DIR") {
         Ok(value) => PathBuf::from(value),
         Err(_) => {
             let output = Command::new("tvm-ffi-config")
                 .arg("--libdir")
-                .output()
-                .expect("Failed to run tvm-ffi-config");
-            if !output.status.success() {
-                panic!("tvm-ffi-config failed with status {}", output.status);
+                .output();
+            match output {
+                Ok(out) if out.status.success() => {
+                    let lib_dir = String::from_utf8(out.stdout)
+                        .expect("Invalid UTF-8 output from tvm-ffi-config")
+                        .trim()
+                        .to_string();
+                    PathBuf::from(lib_dir)
+                }
+                _ => {
+                    // If tvm-ffi-config not available and no TVM_FFI_LIB_DIR, assume external linking
+                    emit_diag(
+                        diagnostics,
+                        "g2p_tvm build: No TVM_FFI_LIB_DIR and tvm-ffi-config unavailable, assuming external linking".to_string(),
+                    );
+                    return;
+                }
             }
-            let lib_dir = String::from_utf8(output.stdout)
-                .expect("Invalid UTF-8 output from tvm-ffi-config")
-                .trim()
-                .to_string();
-            PathBuf::from(lib_dir)
         }
     };
     let lib_dir = ffi_lib_dir.to_string_lossy().to_string();
