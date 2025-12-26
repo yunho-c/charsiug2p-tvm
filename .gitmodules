@@ -4,3 +4,6 @@
 [submodule "external/CharsiuG2P"]
 	path = external/CharsiuG2P
 	url = https://github.com/yunho-c/CharsiuG2P
+[submodule "external/misaki"]
+	path = external/misaki
+	url = https://github.com/yunho-c/misaki
