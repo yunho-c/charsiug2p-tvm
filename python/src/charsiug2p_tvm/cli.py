@@ -24,7 +24,11 @@ from charsiug2p_tvm.tvm_runtime import (
     tvm_g2p_multi,
 )
 from charsiug2p_tvm.eval import evaluate_against_reference, prepare_samples
-from charsiug2p_tvm.misaki_analysis import analyze_misaki_english, write_analysis_csv
+from charsiug2p_tvm.misaki_analysis import (
+    analyze_misaki_english,
+    filter_samples_by_mode,
+    write_analysis_csv,
+)
 from charsiug2p_tvm.profile import parse_targets, profile_targets, write_profile_csv
 from charsiug2p_tvm.tokenizer_export import default_tokenizer_export_dir, export_tokenizer_assets
 
@@ -691,6 +695,21 @@ def analyze_misaki(
     ),
     verbose: bool = typer.Option(False, "--verbose", help="Show extra columns in mode tables."),
     output_csv: Path | None = typer.Option(None, "--output-csv", help="Write per-word results to CSV."),
+    sample_strategy: str | None = typer.Option(
+        None,
+        "--sample-strategy",
+        help="Strategy name to use for mode filtering when writing the CSV.",
+    ),
+    sample_mode: list[str] | None = typer.Option(
+        None,
+        "--sample-mode",
+        help="Filter CSV rows to samples tagged with these modes (repeatable or comma-separated).",
+    ),
+    sample_primary: list[str] | None = typer.Option(
+        None,
+        "--sample-primary",
+        help="Filter CSV rows to samples with these primary modes (repeatable or comma-separated).",
+    ),
 ) -> None:
     source = source.lower().strip()
     scope = scope.lower().strip()
@@ -699,15 +718,31 @@ def analyze_misaki(
     if scope not in {"intersection", "misaki"}:
         raise typer.BadParameter(f"Unsupported scope: {scope}")
 
+    def _parse_multi(values: list[str] | None) -> list[str]:
+        parsed: list[str] = []
+        if values:
+            for value in values:
+                for part in value.split(","):
+                    part = part.strip()
+                    if part:
+                        parsed.append(part)
+        return parsed
+
     parsed_strategies: list[str] = []
     if strategies:
-        for value in strategies:
-            for part in value.split(","):
-                part = part.strip()
-                if part:
-                    parsed_strategies.append(part)
+        parsed_strategies = _parse_multi(strategies)
     if not parsed_strategies:
         parsed_strategies = ["espeak", "ipa"]
+    parsed_sample_modes = _parse_multi(sample_mode)
+    parsed_sample_primary = _parse_multi(sample_primary)
+    wants_sample_filter = bool(parsed_sample_modes or parsed_sample_primary)
+    if wants_sample_filter and output_csv is None:
+        raise typer.BadParameter("--sample-mode/--sample-primary require --output-csv.")
+    if wants_sample_filter and sample_strategy is None:
+        if len(parsed_strategies) == 1:
+            sample_strategy = parsed_strategies[0]
+        else:
+            raise typer.BadParameter("--sample-strategy is required when filtering with multiple strategies.")
 
     report = analyze_misaki_english(
         charsiu_path=charsiu_path,
@@ -812,8 +847,19 @@ def analyze_misaki(
     if output_csv is not None:
         if report.samples is None:
             raise typer.BadParameter("No samples available to write.")
-        write_analysis_csv(output_csv, report.samples, report.strategies)
-        console.print(f"[green]Saved CSV to {output_csv}[/green]")
+        samples = report.samples
+        if wants_sample_filter and sample_strategy is not None:
+            samples = filter_samples_by_mode(
+                samples,
+                strategy=sample_strategy,
+                modes=parsed_sample_modes,
+                primary_modes=parsed_sample_primary,
+            )
+        write_analysis_csv(output_csv, samples, report.strategies)
+        if wants_sample_filter:
+            console.print(f"[green]Saved {len(samples)} filtered samples to {output_csv}[/green]")
+        else:
+            console.print(f"[green]Saved CSV to {output_csv}[/green]")
 
 
 def cli() -> None:

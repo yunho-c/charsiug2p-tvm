@@ -538,3 +538,32 @@ def write_analysis_csv(path: Path, samples: Sequence[AnalysisSample], strategies
                     ]
                 )
             writer.writerow(row)
+
+
+def filter_samples_by_mode(
+    samples: Sequence[AnalysisSample],
+    *,
+    strategy: str,
+    modes: Sequence[str] | None,
+    primary_modes: Sequence[str] | None,
+) -> list[AnalysisSample]:
+    normalized_strategy = normalize_strategy(strategy)
+    mode_set = {mode.strip() for mode in modes or [] if mode.strip()}
+    primary_set = {mode.strip() for mode in primary_modes or [] if mode.strip()}
+
+    filtered: list[AnalysisSample] = []
+    for sample in samples:
+        hyp = sample.mapped_stress_by_strategy.get(normalized_strategy)
+        if hyp is None:
+            raise ValueError(f"Missing mapped output for strategy: {normalized_strategy}")
+        tags = classify_failure_modes(sample.misaki, hyp)
+        if not tags:
+            tags = {"match"}
+        primary = "match" if tags == {"match"} else pick_primary_mode(tags)
+
+        if mode_set and not (tags & mode_set):
+            continue
+        if primary_set and primary not in primary_set:
+            continue
+        filtered.append(sample)
+    return filtered
