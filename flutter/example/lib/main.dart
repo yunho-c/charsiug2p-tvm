@@ -29,7 +29,8 @@ class G2pHome extends StatefulWidget {
 
 class _G2pHomeState extends State<G2pHome> {
   final _assetRootController = TextEditingController();
-  final _assetPrefixController = TextEditingController(text: 'assets/charsiug2p');
+  final _assetPrefixController =
+      TextEditingController(text: 'assets/charsiug2p');
   final _langController = TextEditingController(text: 'eng-us');
   final _wordsController = TextEditingController(text: 'Char siu');
 
@@ -56,6 +57,7 @@ class _G2pHomeState extends State<G2pHome> {
   CharsiuG2p? _model;
   String? _modelAssetRoot;
   bool _useBundledAssets = true;
+  bool _useSystemLib = false;
   String _target = 'metal-ios';
   String _device = 'metal';
   String _result = '';
@@ -85,7 +87,8 @@ class _G2pHomeState extends State<G2pHome> {
         if (prefix.isEmpty) {
           throw ArgumentError('Asset prefix is required.');
         }
-        assetRoot = await CharsiuG2pAssets.prepareTokenizerRoot(assetPrefix: prefix);
+        assetRoot =
+            await CharsiuG2pAssets.prepareTokenizerRoot(assetPrefix: prefix);
         _assetRootController.text = assetRoot;
       } else {
         assetRoot = _assetRootController.text.trim();
@@ -107,6 +110,8 @@ class _G2pHomeState extends State<G2pHome> {
           assetRoot: assetRoot,
           target: _target,
           device: _device,
+          useSystemLib: _useSystemLib,
+          systemLibPrefix: _useSystemLib ? 'g2p_' : null,
         );
         _modelAssetRoot = assetRoot;
       }
@@ -175,6 +180,24 @@ class _G2pHomeState extends State<G2pHome> {
               ),
             ),
           ],
+          const SizedBox(height: 12),
+          CheckboxListTile(
+            title: const Text('Use System Lib (Static Linking)'),
+            subtitle: const Text('Required for iOS'),
+            value: _useSystemLib,
+            onChanged: _loading
+                ? null
+                : (value) {
+                    setState(() {
+                      _useSystemLib = value ?? false;
+                      // Auto-select metal-ios if system lib is enabled, as meaningful default
+                      if (_useSystemLib && _target != 'metal-ios') {
+                        _target = 'metal-ios';
+                        _device = 'metal';
+                      }
+                    });
+                  },
+          ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: _target,
