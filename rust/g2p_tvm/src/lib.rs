@@ -25,6 +25,8 @@ pub enum TvmError {
         decoder_prefill: Option<PathBuf>,
         decoder_step: Option<PathBuf>,
     },
+    MissingSystemLibPrefix(&'static str),
+    MissingDecoder,
     InvalidDevice(String),
     TensorShapeMismatch { expected: usize, got: usize },
     InvalidShapeDimension(i64),
@@ -65,6 +67,12 @@ impl fmt::Display for TvmError {
                 "KV-cache artifacts are incomplete. decoder_prefill={:?}, decoder_step={:?}",
                 decoder_prefill, decoder_step
             ),
+            TvmError::MissingSystemLibPrefix(name) => {
+                write!(f, "Missing system-lib prefix for {name}")
+            }
+            TvmError::MissingDecoder => {
+                write!(f, "Decoder module is not available")
+            }
             TvmError::InvalidDevice(device) => {
                 write!(f, "Unsupported device '{device}' for TVM runtime.")
             }
@@ -104,6 +112,39 @@ pub struct TvmArtifacts {
     pub decoder: PathBuf,
     pub decoder_prefill: Option<PathBuf>,
     pub decoder_step: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SystemLibPrefixes {
+    pub encoder: String,
+    pub decoder: Option<String>,
+    pub decoder_prefill: Option<String>,
+    pub decoder_step: Option<String>,
+}
+
+impl SystemLibPrefixes {
+    pub fn new(base: impl AsRef<str>, use_kv_cache: bool) -> Self {
+        let base = base.as_ref();
+        if use_kv_cache {
+            Self {
+                encoder: format!("{base}encoder_"),
+                decoder: None,
+                decoder_prefill: Some(format!("{base}decoder_prefill_")),
+                decoder_step: Some(format!("{base}decoder_step_")),
+            }
+        } else {
+            Self {
+                encoder: format!("{base}encoder_"),
+                decoder: Some(format!("{base}decoder_")),
+                decoder_prefill: None,
+                decoder_step: None,
+            }
+        }
+    }
+
+    pub fn has_kv_cache(&self) -> bool {
+        self.decoder_prefill.is_some() && self.decoder_step.is_some()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -207,6 +248,28 @@ impl TvmModule {
         })
     }
 
+    pub fn from_module(module: Module, label: impl Into<PathBuf>) -> Self {
+        Self {
+            module,
+            path: label.into(),
+        }
+    }
+
+    pub fn from_system_lib(prefix: &str) -> Result<Self, TvmError> {
+        let system_lib = Function::get_global("ffi.SystemLib")?;
+        let module_any = if prefix.is_empty() {
+            system_lib.call_tuple(())?
+        } else {
+            let prefix_arg = tvm_ffi::String::from(prefix);
+            system_lib.call_tuple((prefix_arg,))?
+        };
+        let module: Module = module_any.try_into()?;
+        Ok(Self::from_module(
+            module,
+            PathBuf::from(format!("<system-lib:{prefix}>")),
+        ))
+    }
+
     pub fn main(&self) -> Result<Function, TvmError> {
         self.module.get_function(MAIN_FUNCTION).map_err(|_error| {
             TvmError::MissingFunction {
@@ -216,7 +279,8 @@ impl TvmModule {
         })
     }
 
-    fn load_entry(self, name: &str, vm_config: VmConfig) -> Result<LoadedModule, TvmError> {
+    pub fn load_entry(self, name: &str, device: DeviceConfig) -> Result<LoadedModule, TvmError> {
+        let vm_config = VmConfig::new(device);
         if let Ok(function) = self.module.get_function(name) {
             return Ok(LoadedModule {
                 library: self.module,
@@ -253,7 +317,7 @@ impl TvmModule {
 
 pub struct TvmExecutable {
     encoder: LoadedModule,
-    decoder: LoadedModule,
+    decoder: Option<LoadedModule>,
     decoder_prefill: Option<LoadedModule>,
     decoder_step: Option<LoadedModule>,
 }
@@ -268,13 +332,12 @@ impl TvmExecutable {
         device: DeviceConfig,
     ) -> Result<Self, TvmError> {
         artifacts.validate()?;
-        let vm_config = VmConfig::new(device);
-        let encoder = TvmModule::load(&artifacts.encoder)?.load_entry(MAIN_FUNCTION, vm_config)?;
-        let decoder = TvmModule::load(&artifacts.decoder)?.load_entry(MAIN_FUNCTION, vm_config)?;
+        let encoder = TvmModule::load(&artifacts.encoder)?.load_entry(MAIN_FUNCTION, device)?;
+        let decoder = Some(TvmModule::load(&artifacts.decoder)?.load_entry(MAIN_FUNCTION, device)?);
         let (decoder_prefill, decoder_step) = match (&artifacts.decoder_prefill, &artifacts.decoder_step) {
             (Some(prefill_path), Some(step_path)) => (
-                Some(TvmModule::load(prefill_path)?.load_entry(MAIN_FUNCTION, vm_config)?),
-                Some(TvmModule::load(step_path)?.load_entry(MAIN_FUNCTION, vm_config)?),
+                Some(TvmModule::load(prefill_path)?.load_entry(MAIN_FUNCTION, device)?),
+                Some(TvmModule::load(step_path)?.load_entry(MAIN_FUNCTION, device)?),
             ),
             (None, None) => (None, None),
             _ => {
@@ -292,12 +355,50 @@ impl TvmExecutable {
         })
     }
 
+    pub fn load_system_lib(
+        prefixes: &SystemLibPrefixes,
+        device: DeviceConfig,
+        use_kv_cache: bool,
+    ) -> Result<Self, TvmError> {
+        let encoder_prefix = prefixes.encoder.as_str();
+        let encoder = TvmModule::from_system_lib(encoder_prefix)?.load_entry(MAIN_FUNCTION, device)?;
+        let (decoder, decoder_prefill, decoder_step) = if use_kv_cache {
+            let prefill_prefix = prefixes
+                .decoder_prefill
+                .as_ref()
+                .ok_or(TvmError::MissingSystemLibPrefix("decoder_prefill"))?;
+            let step_prefix = prefixes
+                .decoder_step
+                .as_ref()
+                .ok_or(TvmError::MissingSystemLibPrefix("decoder_step"))?;
+            let prefill = TvmModule::from_system_lib(prefill_prefix)?.load_entry(MAIN_FUNCTION, device)?;
+            let step = TvmModule::from_system_lib(step_prefix)?.load_entry(MAIN_FUNCTION, device)?;
+            (None, Some(prefill), Some(step))
+        } else {
+            let decoder_prefix = prefixes
+                .decoder
+                .as_ref()
+                .ok_or(TvmError::MissingSystemLibPrefix("decoder"))?;
+            let decoder = TvmModule::from_system_lib(decoder_prefix)?.load_entry(MAIN_FUNCTION, device)?;
+            (Some(decoder), None, None)
+        };
+        Ok(Self {
+            encoder,
+            decoder,
+            decoder_prefill,
+            decoder_step,
+        })
+    }
+
     pub fn encoder_main(&self) -> &Function {
         &self.encoder.entry
     }
 
     pub fn decoder_main(&self) -> &Function {
-        &self.decoder.entry
+        self.decoder
+            .as_ref()
+            .map(|module| module.entry())
+            .expect("decoder is missing")
     }
 
     pub fn has_kv_cache(&self) -> bool {
@@ -315,12 +416,13 @@ impl TvmExecutable {
         encoder_hidden_states: &Tensor,
         encoder_attention_mask: &Tensor,
     ) -> Result<Tensor, TvmError> {
+        let decoder = self.decoder.as_ref().ok_or(TvmError::MissingDecoder)?;
         let args = [
             AnyView::from(decoder_input_ids),
             AnyView::from(encoder_hidden_states),
             AnyView::from(encoder_attention_mask),
         ];
-        self.call_tensor(&self.decoder.entry, &args)
+        self.call_tensor(decoder.entry(), &args)
     }
 
     pub fn call_decoder_prefill(
@@ -396,12 +498,18 @@ impl VmConfig {
     }
 }
 
-struct LoadedModule {
+pub struct LoadedModule {
     #[allow(dead_code)]
     library: Module,
     #[allow(dead_code)]
     executable: Option<Module>,
     entry: Function,
+}
+
+impl LoadedModule {
+    pub fn entry(&self) -> &Function {
+        &self.entry
+    }
 }
 
 fn initialize_vm(vm_init: &Function, config: VmConfig) -> Result<(), TvmError> {

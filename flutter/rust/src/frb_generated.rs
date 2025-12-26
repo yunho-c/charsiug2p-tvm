@@ -354,6 +354,8 @@ impl SseDecode for crate::api::G2pModelConfig {
         let mut var_deviceId = <i32>::sse_decode(deserializer);
         let mut var_tokenizerRoot = <Option<String>>::sse_decode(deserializer);
         let mut var_tvmRoot = <Option<String>>::sse_decode(deserializer);
+        let mut var_useSystemLib = <bool>::sse_decode(deserializer);
+        let mut var_systemLibPrefix = <Option<String>>::sse_decode(deserializer);
         return crate::api::G2pModelConfig {
             asset_root: var_assetRoot,
             checkpoint: var_checkpoint,
@@ -367,6 +369,8 @@ impl SseDecode for crate::api::G2pModelConfig {
             device_id: var_deviceId,
             tokenizer_root: var_tokenizerRoot,
             tvm_root: var_tvmRoot,
+            use_system_lib: var_useSystemLib,
+            system_lib_prefix: var_systemLibPrefix,
         };
     }
 }
@@ -574,6 +578,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::G2pModelConfig {
             self.device_id.into_into_dart().into_dart(),
             self.tokenizer_root.into_into_dart().into_dart(),
             self.tvm_root.into_into_dart().into_dart(),
+            self.use_system_lib.into_into_dart().into_dart(),
+            self.system_lib_prefix.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -695,6 +701,8 @@ impl SseEncode for crate::api::G2pModelConfig {
         <i32>::sse_encode(self.device_id, serializer);
         <Option<String>>::sse_encode(self.tokenizer_root, serializer);
         <Option<String>>::sse_encode(self.tvm_root, serializer);
+        <bool>::sse_encode(self.use_system_lib, serializer);
+        <Option<String>>::sse_encode(self.system_lib_prefix, serializer);
     }
 }
 

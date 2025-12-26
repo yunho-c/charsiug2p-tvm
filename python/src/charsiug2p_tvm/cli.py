@@ -93,6 +93,9 @@ def _print_compile_diagnostics(
     fp16_input_names: list[str] | None,
     use_kv_cache: bool,
     skip_dlight_gemv: bool,
+    system_lib: bool,
+    system_lib_prefix: str,
+    system_lib_name: str,
 ) -> None:
     table = Table(title="TVM Compile Diagnostics", show_header=True, header_style="bold")
     table.add_column("Key", style="cyan")
@@ -110,6 +113,10 @@ def _print_compile_diagnostics(
     table.add_row("fp16_inputs", _format_list(fp16_input_names))
     table.add_row("use_kv_cache", str(use_kv_cache))
     table.add_row("skip_dlight_gemv", str(skip_dlight_gemv))
+    table.add_row("system_lib", str(system_lib))
+    if system_lib:
+        table.add_row("system_lib_prefix", system_lib_prefix)
+        table.add_row("system_lib_name", system_lib_name)
     console.print(table)
 
 
@@ -236,6 +243,21 @@ def compile_model(
         "--fp16-input",
         help="Function parameter name to cast to fp16 (repeatable).",
     ),
+    system_lib: bool = typer.Option(
+        False,
+        "--system-lib/--no-system-lib",
+        help="Export a static system-lib archive instead of dynamic artifacts.",
+    ),
+    system_lib_prefix: str = typer.Option(
+        "g2p_",
+        "--system-lib-prefix",
+        help="Prefix base for system-lib registrations (e.g., g2p_).",
+    ),
+    system_lib_name: str = typer.Option(
+        "libg2p_system_lib.a",
+        "--system-lib-name",
+        help="Output name for the static system-lib archive.",
+    ),
     use_kv_cache: bool = typer.Option(
         True,
         "--kv-cache/--no-kv-cache",
@@ -276,6 +298,9 @@ def compile_model(
             fp16_input_names=fp16_input_names,
             use_kv_cache=use_kv_cache,
             skip_dlight_gemv=skip_dlight_gemv,
+            system_lib=system_lib,
+            system_lib_prefix=system_lib_prefix,
+            system_lib_name=system_lib_name,
         )
     for size in compile_sizes:
         size_output_dir = output_dir or default_output_dir(
@@ -300,6 +325,9 @@ def compile_model(
             fp16_input_names=fp16_input_names,
             use_kv_cache=use_kv_cache,
             skip_dlight_gemv=skip_dlight_gemv,
+            system_lib=system_lib,
+            system_lib_prefix=system_lib_prefix,
+            system_lib_name=system_lib_name,
         )
         if not quiet:
             table = Table(title=f"TVM Compile Outputs (batch={size})", show_header=True, header_style="bold")

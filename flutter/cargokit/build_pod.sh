@@ -49,6 +49,13 @@ do
   fi
 done
 
+if [ "$CARGOKIT_DARWIN_PLATFORM_NAME" = "iphoneos" ] || [ "$CARGOKIT_DARWIN_PLATFORM_NAME" = "iphonesimulator" ]; then
+  export TVM_STATIC_LINK=1
+  export TVM_FFI_STATIC=1
+  # Explicitly point to the iOS-compiled TVM FFI static library
+  export TVM_FFI_LIB_DIR="/Users/yunhocho/GitHub/kokoro-tvm/reference/tvm/build-ios/lib"
+fi
+
 sh "$BASEDIR/run_build_tool.sh" build-pod "$@"
 
 # macOS: stage TVM FFI dylibs so the Flutter app can link/load them via rpath.

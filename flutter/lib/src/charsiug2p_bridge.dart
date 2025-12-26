@@ -26,6 +26,8 @@ class CharsiuG2p {
     int? deviceId,
     String? tokenizerRoot,
     String? tvmRoot,
+    bool? useSystemLib,
+    String? systemLibPrefix,
   }) async {
     final defaults = await g2PPlatformDefaults();
     final base = await G2pModelConfig.default_();
@@ -42,6 +44,8 @@ class CharsiuG2p {
       deviceId: deviceId ?? base.deviceId,
       tokenizerRoot: tokenizerRoot ?? base.tokenizerRoot,
       tvmRoot: tvmRoot ?? base.tvmRoot,
+      useSystemLib: useSystemLib ?? base.useSystemLib,
+      systemLibPrefix: systemLibPrefix ?? base.systemLibPrefix,
     );
     final model = await g2PModelNew(config: config);
     return CharsiuG2p._(model);

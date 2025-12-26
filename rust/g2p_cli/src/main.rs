@@ -85,6 +85,8 @@ struct Args {
     device_id: i32,
     #[arg(long, default_value_t = false, help = "Insert a space after the language prefix")]
     space_after_colon: bool,
+    #[arg(long, default_value_t = false, help = "Use statically linked system-lib artifacts")]
+    system_lib: bool,
     #[arg(help = "Words to convert to phonemes")]
     words: Vec<String>,
 }
@@ -138,6 +140,44 @@ fn main() {
             }
         },
     };
+    if args.system_lib {
+        if args.encoder.is_some()
+            || args.decoder.is_some()
+            || args.decoder_prefill.is_some()
+            || args.decoder_step.is_some()
+        {
+            eprintln!("--system-lib cannot be used with explicit artifact paths.");
+            process::exit(1);
+        }
+        if !args.batch_sizes.is_empty() {
+            eprintln!("--system-lib currently supports a single batch size.");
+            process::exit(1);
+        }
+        let prefixes = resolver.resolve_system_lib_prefixes(&artifact_spec).unwrap_or_else(|err| {
+            eprintln!("Failed to locate system-lib metadata: {err}");
+            process::exit(1);
+        });
+        let pipeline = match G2pPipeline::load_system_lib(tokenizer_metadata, prefixes, pipeline_config) {
+            Ok(pipeline) => pipeline,
+            Err(err) => {
+                eprintln!("Failed to initialize pipeline: {err}");
+                process::exit(1);
+            }
+        };
+        match pipeline.run(&args.words, &args.lang, args.space_after_colon) {
+            Ok(outputs) => {
+                for (word, phoneme) in args.words.iter().zip(outputs.iter()) {
+                    println!("{word}\t{phoneme}");
+                }
+            }
+            Err(err) => {
+                eprintln!("Inference failed: {err}");
+                process::exit(1);
+            }
+        }
+        return;
+    }
+
     if !args.batch_sizes.is_empty()
         && (args.encoder.is_some()
             || args.decoder.is_some()

@@ -77,6 +77,8 @@ class G2pModelConfig {
   final int deviceId;
   final String? tokenizerRoot;
   final String? tvmRoot;
+  final bool useSystemLib;
+  final String? systemLibPrefix;
 
   const G2pModelConfig({
     required this.assetRoot,
@@ -91,6 +93,8 @@ class G2pModelConfig {
     required this.deviceId,
     this.tokenizerRoot,
     this.tvmRoot,
+    required this.useSystemLib,
+    this.systemLibPrefix,
   });
 
   static Future<G2pModelConfig> default_() =>
@@ -109,7 +113,9 @@ class G2pModelConfig {
       device.hashCode ^
       deviceId.hashCode ^
       tokenizerRoot.hashCode ^
-      tvmRoot.hashCode;
+      tvmRoot.hashCode ^
+      useSystemLib.hashCode ^
+      systemLibPrefix.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -127,7 +133,9 @@ class G2pModelConfig {
           device == other.device &&
           deviceId == other.deviceId &&
           tokenizerRoot == other.tokenizerRoot &&
-          tvmRoot == other.tvmRoot;
+          tvmRoot == other.tvmRoot &&
+          useSystemLib == other.useSystemLib &&
+          systemLibPrefix == other.systemLibPrefix;
 }
 
 class G2pPlatformDefaults {

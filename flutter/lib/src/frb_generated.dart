@@ -345,8 +345,8 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
   G2pModelConfig dco_decode_g_2_p_model_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 12)
-      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    if (arr.length != 14)
+      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
     return G2pModelConfig(
       assetRoot: dco_decode_String(arr[0]),
       checkpoint: dco_decode_String(arr[1]),
@@ -360,6 +360,8 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
       deviceId: dco_decode_i_32(arr[9]),
       tokenizerRoot: dco_decode_opt_String(arr[10]),
       tvmRoot: dco_decode_opt_String(arr[11]),
+      useSystemLib: dco_decode_bool(arr[12]),
+      systemLibPrefix: dco_decode_opt_String(arr[13]),
     );
   }
 
@@ -526,6 +528,8 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
     var var_deviceId = sse_decode_i_32(deserializer);
     var var_tokenizerRoot = sse_decode_opt_String(deserializer);
     var var_tvmRoot = sse_decode_opt_String(deserializer);
+    var var_useSystemLib = sse_decode_bool(deserializer);
+    var var_systemLibPrefix = sse_decode_opt_String(deserializer);
     return G2pModelConfig(
         assetRoot: var_assetRoot,
         checkpoint: var_checkpoint,
@@ -538,7 +542,9 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
         device: var_device,
         deviceId: var_deviceId,
         tokenizerRoot: var_tokenizerRoot,
-        tvmRoot: var_tvmRoot);
+        tvmRoot: var_tvmRoot,
+        useSystemLib: var_useSystemLib,
+        systemLibPrefix: var_systemLibPrefix);
   }
 
   @protected
@@ -712,6 +718,8 @@ class G2pBridgeApiImpl extends G2pBridgeApiImplPlatform
     sse_encode_i_32(self.deviceId, serializer);
     sse_encode_opt_String(self.tokenizerRoot, serializer);
     sse_encode_opt_String(self.tvmRoot, serializer);
+    sse_encode_bool(self.useSystemLib, serializer);
+    sse_encode_opt_String(self.systemLibPrefix, serializer);
   }
 
   @protected

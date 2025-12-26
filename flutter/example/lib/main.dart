@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:charsiug2p_flutter/charsiug2p_flutter.dart';
 
 Future<void> main() async {
@@ -29,7 +30,8 @@ class G2pHome extends StatefulWidget {
 
 class _G2pHomeState extends State<G2pHome> {
   final _assetRootController = TextEditingController();
-  final _assetPrefixController = TextEditingController(text: 'assets/charsiug2p');
+  final _assetPrefixController =
+      TextEditingController(text: 'assets/charsiug2p');
   final _langController = TextEditingController(text: 'eng-us');
   final _wordsController = TextEditingController(text: 'Char siu');
 
@@ -56,6 +58,7 @@ class _G2pHomeState extends State<G2pHome> {
   CharsiuG2p? _model;
   String? _modelAssetRoot;
   bool _useBundledAssets = true;
+  bool _useSystemLib = false;
   String _target = 'metal-ios';
   String _device = 'metal';
   String _result = '';
@@ -85,7 +88,8 @@ class _G2pHomeState extends State<G2pHome> {
         if (prefix.isEmpty) {
           throw ArgumentError('Asset prefix is required.');
         }
-        assetRoot = await CharsiuG2pAssets.prepareTokenizerRoot(assetPrefix: prefix);
+        assetRoot =
+            await CharsiuG2pAssets.prepareTokenizerRoot(assetPrefix: prefix);
         _assetRootController.text = assetRoot;
       } else {
         assetRoot = _assetRootController.text.trim();
@@ -107,6 +111,8 @@ class _G2pHomeState extends State<G2pHome> {
           assetRoot: assetRoot,
           target: _target,
           device: _device,
+          useSystemLib: _useSystemLib,
+          systemLibPrefix: _useSystemLib ? 'g2p_' : null,
         );
         _modelAssetRoot = assetRoot;
       }
@@ -117,7 +123,14 @@ class _G2pHomeState extends State<G2pHome> {
       });
     } catch (err) {
       setState(() {
-        _error = err.toString();
+        if (err is G2pFfiError) {
+          _error = '${err.kind.name}: ${err.message}';
+          if (err.details != null && err.details!.isNotEmpty) {
+            _error = '$_error\n\nDetails:\n${err.details}';
+          }
+        } else {
+          _error = err.toString();
+        }
       });
     } finally {
       setState(() {
@@ -175,6 +188,24 @@ class _G2pHomeState extends State<G2pHome> {
               ),
             ),
           ],
+          const SizedBox(height: 12),
+          CheckboxListTile(
+            title: const Text('Use System Lib (Static Linking)'),
+            subtitle: const Text('Required for iOS'),
+            value: _useSystemLib,
+            onChanged: _loading
+                ? null
+                : (value) {
+                    setState(() {
+                      _useSystemLib = value ?? false;
+                      // Auto-select metal-ios if system lib is enabled, as meaningful default
+                      if (_useSystemLib && _target != 'metal-ios') {
+                        _target = 'metal-ios';
+                        _device = 'metal';
+                      }
+                    });
+                  },
+          ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: _target,
@@ -241,15 +272,68 @@ class _G2pHomeState extends State<G2pHome> {
           const SizedBox(height: 16),
           if (_error.isNotEmpty) ...[
             Text('Error:', style: Theme.of(context).textTheme.titleMedium),
-            Text(_error),
+            SelectableText(_error),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: _error));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Error copied to clipboard')),
+                );
+              },
+              icon: const Icon(Icons.copy),
+              label: const Text('Copy Error'),
+            ),
             const SizedBox(height: 16),
           ],
           if (_result.isNotEmpty) ...[
             Text('Output:', style: Theme.of(context).textTheme.titleMedium),
             Text(_result),
           ],
+          const SizedBox(height: 16),
+          TextButton.icon(
+            onPressed: _debugAssets,
+            icon: const Icon(Icons.bug_report),
+            label: const Text('Debug Assets (List all)'),
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _debugAssets() async {
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final assets = manifest.listAssets().toList()..sort();
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('AssetManifest'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                itemCount: assets.length,
+                itemBuilder: (context, index) {
+                  return SelectableText(assets[index]);
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load manifest: $e')),
+      );
+    }
   }
 }
