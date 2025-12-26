@@ -123,7 +123,14 @@ class _G2pHomeState extends State<G2pHome> {
       });
     } catch (err) {
       setState(() {
-        _error = err.toString();
+        if (err is G2pFfiError) {
+          _error = '${err.kind.name}: ${err.message}';
+          if (err.details != null && err.details!.isNotEmpty) {
+            _error = '$_error\n\nDetails:\n${err.details}';
+          }
+        } else {
+          _error = err.toString();
+        }
       });
     } finally {
       setState(() {
