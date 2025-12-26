@@ -272,7 +272,18 @@ class _G2pHomeState extends State<G2pHome> {
           const SizedBox(height: 16),
           if (_error.isNotEmpty) ...[
             Text('Error:', style: Theme.of(context).textTheme.titleMedium),
-            Text(_error),
+            SelectableText(_error),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: _error));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Error copied to clipboard')),
+                );
+              },
+              icon: const Icon(Icons.copy),
+              label: const Text('Copy Error'),
+            ),
             const SizedBox(height: 16),
           ],
           if (_result.isNotEmpty) ...[
