@@ -7,3 +7,6 @@
 [submodule "external/misaki"]
 	path = external/misaki
 	url = https://github.com/yunho-c/misaki
+[submodule "external/tvm_flutter"]
+	path = external/tvm_flutter
+	url = https://github.com/yunho-c/tvm_flutter
