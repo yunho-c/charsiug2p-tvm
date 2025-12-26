@@ -6,6 +6,14 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import tvm
+    import tvm.relax
+    import tvm.ir
+    import tvm.target
+    import tvm.transform
 
 from charsiug2p_tvm.config import DEFAULT_CONFIG, resolve_target
 
@@ -191,7 +199,9 @@ def export_torch_model(
             return self.lm_head(sequence_output)
 
     encoder = EncoderWrapper(model.encoder)
-    decoder = DecoderWrapper(model.decoder, model.lm_head, model.config, getattr(model, "model_dim", model.config.d_model))
+    decoder = DecoderWrapper(
+        model.decoder, model.lm_head, model.config, getattr(model, "model_dim", model.config.d_model)
+    )
 
     input_ids = torch.zeros((batch_size, max_input_bytes), dtype=torch.long)
     attention_mask = torch.ones_like(input_ids)
@@ -389,9 +399,7 @@ def export_torch_model_with_cache(
             max_pos = cur_pos.to(torch.int64) + decoder_input_ids.shape[1]
             valid = positions < max_pos
             decoder_attention_mask = valid.to(torch.long).unsqueeze(0).expand(decoder_input_ids.shape[0], -1)
-            pos_offset = torch.zeros(
-                (decoder_input_ids.shape[1],), device=decoder_input_ids.device, dtype=torch.int64
-            )
+            pos_offset = torch.zeros((decoder_input_ids.shape[1],), device=decoder_input_ids.device, dtype=torch.int64)
             cache_position = pos_offset + cur_pos.to(torch.int64)
             outputs = self.decoder(
                 input_ids=decoder_input_ids,
@@ -533,7 +541,13 @@ def compile_tvm_module(
                 relax_pipeline=relax_pipeline,
             )
             lib_path = temp_dir / f"lib{name}.a"
-            exec_obj.export_library(str(lib_path), fcompile=cc.create_staticlib)
+            if "ios" in target_name:
+                # Use standard staticlib creation; TVM handles cross-compile of objects via target triple.
+                # If we needed to link .o files using libtool or similar, we'd do it here.
+                # For now, we trust relax.build produced arm64 objects.
+                exec_obj.export_library(str(lib_path), fcompile=cc.create_staticlib)
+            else:
+                exec_obj.export_library(str(lib_path), fcompile=cc.create_staticlib)
             static_libs.append(lib_path)
             script_path = output_dir / f"{name}.relax.py"
             script_path.write_text(mod.script(show_meta=True), encoding="utf-8")

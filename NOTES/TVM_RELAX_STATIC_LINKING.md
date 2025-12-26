@@ -330,3 +330,21 @@ TVM_SYSTEM_LIB=/path/to/system_lib.a \
 TVM_SYSTEM_LIB_PREFIX=g2p_test_ \
 cargo test -p charsiug2p-g2p-tvm system_lib_smoke
 ```
+
+And a quick test-run of the CLI:
+
+```bash
+TVM_SYSTEM_LIB=/path/to/libg2p_system_lib.a \
+TVM_RUNTIME_LIB=/path/to/libtvm_runtime.dylib \
+cargo run -p charsiug2p-g2p-cli -- --system-lib --tvm-target llvm --lang eng-us Char siu
+```
+
+### Known Limitation: Hardcoded iOS Paths
+
+As of Dec 2025, the Flutter iOS build script (`flutter/cargokit/build_pod.sh`) contains a hardcoded path to the `libtvm_ffi_static.a` library for iOS:
+
+```bash
+export TVM_FFI_LIB_DIR="/Users/yunhocho/GitHub/kokoro-tvm/reference/tvm/build-ios/lib"
+```
+
+This was done to bypass difficulties in passing this path dynamically from the Flutter/CocoaPods environment to the Cargo build script. This **must** be updated or parameterized for other machines to build the project. Ideally, this should be configurable via an environment variable or a local config file (e.g., `local.properties`).
