@@ -15,7 +15,5 @@ dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/charsiug2p/
-    - assets/charsiug2p/tokenizers/charsiu/g2p_multilingual_byT5_tiny_8_layers_100/in64_out128/
-    - assets/charsiug2p/tvm/charsiu/g2p_multilingual_byT5_tiny_8_layers_100/in64_out128/metal-ios/
-    - assets/charsiug2p/tvm/charsiu/g2p_multilingual_byT5_tiny_8_layers_100/b1_in64_out128/metal-ios/
+    - assets/charsiug2p/tokenizers/charsiu_g2p_multilingual_byT5_tiny_8_layers_100/in64_out128/
+    - assets/charsiug2p/tvm/charsiu_g2p_multilingual_byT5_tiny_8_layers_100/b1_in64_out128/metal-ios/
