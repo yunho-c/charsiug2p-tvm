@@ -160,8 +160,77 @@ def _strip_stress(text: str) -> str:
     return text.translate(_STRESS_TRANSLATION)
 
 
-def _contains_any(text: str, tokens: Sequence[str]) -> bool:
-    return any(token in text for token in tokens)
+_TOKEN_UNITS = [
+    "ᵊl",
+    "ᵊn",
+    "ᵊm",
+    "əl",
+    "ən",
+    "əm",
+    "aɪ",
+    "aʊ",
+    "eɪ",
+    "oʊ",
+    "ɔɪ",
+    "əʊ",
+    "tʃ",
+    "dʒ",
+    "ɜɹ",
+    "əɹ",
+]
+
+
+def _tokenize_phonemes(text: str) -> list[str]:
+    tokens: list[str] = []
+    i = 0
+    while i < len(text):
+        if text[i] in {"ˈ", "ˌ"}:
+            tokens.append(text[i])
+            i += 1
+            continue
+        matched = False
+        for unit in _TOKEN_UNITS:
+            if text.startswith(unit, i):
+                tokens.append(unit)
+                i += len(unit)
+                matched = True
+                break
+        if matched:
+            continue
+        tokens.append(text[i])
+        i += 1
+    return tokens
+
+
+def _edit_ops(ref_tokens: Sequence[str], hyp_tokens: Sequence[str]) -> list[tuple[str, str, str]]:
+    rows = len(ref_tokens) + 1
+    cols = len(hyp_tokens) + 1
+    dp = [[0] * cols for _ in range(rows)]
+    for i in range(rows):
+        dp[i][0] = i
+    for j in range(cols):
+        dp[0][j] = j
+    for i in range(1, rows):
+        for j in range(1, cols):
+            cost = 0 if ref_tokens[i - 1] == hyp_tokens[j - 1] else 1
+            dp[i][j] = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
+
+    ops: list[tuple[str, str, str]] = []
+    i = len(ref_tokens)
+    j = len(hyp_tokens)
+    while i > 0 or j > 0:
+        if i > 0 and j > 0 and dp[i][j] == dp[i - 1][j - 1] + (ref_tokens[i - 1] != hyp_tokens[j - 1]):
+            if ref_tokens[i - 1] != hyp_tokens[j - 1]:
+                ops.append(("sub", ref_tokens[i - 1], hyp_tokens[j - 1]))
+            i -= 1
+            j -= 1
+        elif i > 0 and dp[i][j] == dp[i - 1][j] + 1:
+            ops.append(("del", ref_tokens[i - 1], ""))
+            i -= 1
+        else:
+            ops.append(("ins", "", hyp_tokens[j - 1]))
+            j -= 1
+    return ops
 
 
 def classify_failure_modes(ref: str, hyp: str) -> set[str]:
@@ -169,31 +238,51 @@ def classify_failure_modes(ref: str, hyp: str) -> set[str]:
         return set()
 
     tags: set[str] = set()
+    ops = _edit_ops(_tokenize_phonemes(ref), _tokenize_phonemes(hyp))
+    if not ops:
+        return tags
 
-    ref_no_stress = _strip_stress(ref)
-    hyp_no_stress = _strip_stress(hyp)
-    if ref_no_stress == hyp_no_stress:
-        tags.add("stress_only")
-    elif _contains_any(ref, ("ˈ", "ˌ")) or _contains_any(hyp, ("ˈ", "ˌ")):
+    stress_tokens = {"ˈ", "ˌ"}
+    stress_ops = []
+    for op, old, new in ops:
+        if op == "sub" and old in stress_tokens and new in stress_tokens:
+            stress_ops.append(True)
+        elif op == "del" and old in stress_tokens:
+            stress_ops.append(True)
+        elif op == "ins" and new in stress_tokens:
+            stress_ops.append(True)
+    if stress_ops:
         tags.add("stress_mismatch")
+        if len(stress_ops) == len(ops):
+            tags.add("stress_only")
 
-    if _contains_any(ref, ("ᵊ",)) or _contains_any(hyp, ("ᵊ",)):
-        tags.add("syllabic_schwa")
+    ipa_diph = {"aɪ", "aʊ", "eɪ", "oʊ", "ɔɪ", "əʊ"}
+    misaki_diph = {"A", "I", "W", "O", "Y", "Q"}
+    affricate_ipa = {"tʃ", "dʒ"}
+    affricate_misaki = {"ʧ", "ʤ"}
+    rhotic_tokens = {"ɝ", "ɚ", "ɜɹ", "əɹ"}
+    syllabic_tokens = {"ᵊ", "ᵊl", "ᵊn", "ᵊm", "əl", "ən", "əm"}
+    reduced_vowels = {"ə", "ɜ", "ɪ", "ʌ", "ᵻ", "i"}
 
-    if _contains_any(ref, ("ɝ", "ɚ", "ɜɹ", "əɹ")) or _contains_any(hyp, ("ɝ", "ɚ", "ɜɹ", "əɹ")):
-        tags.add("rhotic_vowel")
+    for op, old, new in ops:
+        if op == "sub" and ((old in ipa_diph and new in misaki_diph) or (old in misaki_diph and new in ipa_diph)):
+            tags.add("diphthong_token")
+        if op == "sub" and (
+            (old in affricate_ipa and new in affricate_misaki) or (old in affricate_misaki and new in affricate_ipa)
+        ):
+            tags.add("affricate_token")
+        if old in rhotic_tokens or new in rhotic_tokens:
+            tags.add("rhotic_vowel")
+        if old in syllabic_tokens or new in syllabic_tokens:
+            tags.add("syllabic_schwa")
+        if (old == "ɾ" or new == "ɾ") and (old == "t" or new == "t" or op != "sub"):
+            tags.add("flap")
 
-    if _contains_any(ref, ("A", "I", "W", "O", "Y", "Q")) or _contains_any(hyp, ("A", "I", "W", "O", "Y", "Q")):
-        tags.add("diphthong_token")
-
-    if _contains_any(ref, ("ʧ", "ʤ")) or _contains_any(hyp, ("ʧ", "ʤ")):
-        tags.add("affricate_token")
-
-    if _contains_any(ref, ("ɾ",)) or _contains_any(hyp, ("ɾ",)):
-        tags.add("flap")
-
-    if _contains_any(ref, ("ə", "ɜ", "ɪ", "ʌ", "ᵻ", "i")) or _contains_any(hyp, ("ə", "ɜ", "ɪ", "ʌ", "ᵻ", "i")):
-        tags.add("reduced_vowel")
+    if "rhotic_vowel" not in tags and "syllabic_schwa" not in tags:
+        for op, old, new in ops:
+            if old in reduced_vowels or new in reduced_vowels:
+                tags.add("reduced_vowel")
+                break
 
     if not tags:
         tags.add("other")

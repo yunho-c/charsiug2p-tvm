@@ -21,6 +21,8 @@ This note captures what we learned while mapping CharsiuG2P IPA output into Misa
 - `espeak`: Minimal mapping (aligned with Misaki’s `from_espeak()` in `external/misaki/EN_PHONES.md`). Intended for espeak outputs with tie markers (`^`). This is the least invasive and serves as a baseline.
 - `ipa`: Adds IPA-specific rewrites before the espeak mapping. It normalizes common IPA digraphs (`tʃ`, `dʒ`), diphthongs (`oʊ`, `aɪ`, `aʊ`, `eɪ`, `ɔɪ`), dark-L (`ɫ`), and rhotic vowels (`ɝ`). It also includes heuristics for syllabic consonants. This improves agreement when the input IPA is “traditional” rather than espeak-style.
 - `ipa-flap`: Same as `ipa` but also adds a simple flapping heuristic (`t` between vowels → `ɾ`). This is useful when CharsiuG2P outputs `t` for intervocalic flaps but Misaki’s lexicon uses `ɾ`.
+- `ipa-vowel`: Extends `ipa` with vowel tuning. It promotes stressed schwas to `ʌ`, demotes unstressed `ɜɹ` to `əɹ`, maps unstressed `ɪd/ɪz` to `ᵻd/ᵻz`, and adds an explicit `əɫ → ᵊl` rewrite while avoiding blanket `ən/əm → ᵊn/ᵊm` conversions (favoring syllabic markers instead).
+- `ipa-flap-vowel`: Combines `ipa-vowel` with the flapping heuristic.
 
 ## Implementation pointers
 

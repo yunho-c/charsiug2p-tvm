@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-SUPPORTED_STRATEGIES = {"espeak", "ipa", "ipa-flap"}
+SUPPORTED_STRATEGIES = {"espeak", "ipa", "ipa-flap", "ipa-vowel", "ipa-flap-vowel"}
 
 _FROM_ESPEAKS = sorted(
     {
@@ -53,7 +53,7 @@ _VOWELS = {
     "ᵊ",
 }
 
-_IPA_REWRITES = sorted(
+_IPA_REWRITES_BASE = sorted(
     {
         "tʃ": "t^ʃ",
         "dʒ": "d^ʒ",
@@ -72,11 +72,45 @@ _IPA_REWRITES = sorted(
     key=lambda kv: -len(kv[0]),
 )
 
+_IPA_REWRITES_VOWEL = sorted(
+    {
+        "tʃ": "t^ʃ",
+        "dʒ": "d^ʒ",
+        "oʊ": "o^ʊ",
+        "əʊ": "ə^ʊ",
+        "aɪ": "a^ɪ",
+        "aʊ": "a^ʊ",
+        "eɪ": "e^ɪ",
+        "ɔɪ": "ɔ^ɪ",
+        "ɝ": "ɜɹ",
+        "ɫ": "l",
+        "əl": "ə^l",
+        "əɫ": "ə^l",
+    }.items(),
+    key=lambda kv: -len(kv[0]),
+)
+
+_IPA_STRATEGIES = {"ipa", "ipa-flap", "ipa-vowel", "ipa-flap-vowel"}
+_VOWEL_TUNED_STRATEGIES = {"ipa-vowel", "ipa-flap-vowel"}
+_FLAP_STRATEGIES = {"ipa-flap", "ipa-flap-vowel"}
+
 
 def normalize_strategy(strategy: str) -> str:
-    normalized = strategy.strip().lower().replace("_", "-")
-    if normalized in {"ipa+flap", "ipa+flaps"}:
-        normalized = "ipa-flap"
+    normalized = strategy.strip().lower().replace("_", "-").replace("+", "-")
+    if normalized == "espeak":
+        return normalized
+    parts = [part for part in normalized.split("-") if part]
+    if "ipa" in parts:
+        has_flap = "flap" in parts or "flaps" in parts
+        has_vowel = "vowel" in parts or "vowels" in parts
+        if has_flap and has_vowel:
+            normalized = "ipa-flap-vowel"
+        elif has_vowel:
+            normalized = "ipa-vowel"
+        elif has_flap:
+            normalized = "ipa-flap"
+        else:
+            normalized = "ipa"
     if normalized not in SUPPORTED_STRATEGIES:
         raise ValueError(f"Unsupported strategy: {strategy}")
     return normalized
@@ -96,9 +130,9 @@ def _swap_syllabic_markers(text: str) -> str:
     return "".join(chars).replace("\u0329", "")
 
 
-def _apply_ipa_rewrites(text: str) -> str:
+def _apply_ipa_rewrites(text: str, rewrites: list[tuple[str, str]]) -> str:
     text = text.replace("\u0361", "^")
-    for old, new in _IPA_REWRITES:
+    for old, new in rewrites:
         text = text.replace(old, new)
     return text
 
@@ -129,11 +163,75 @@ def _apply_flap(text: str) -> str:
     return "".join(result)
 
 
+def _apply_vowel_tuning(text: str) -> str:
+    result: list[str] = []
+    pending_stress: str | None = None
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if char in {"ˈ", "ˌ"}:
+            if pending_stress:
+                result.append(pending_stress)
+            pending_stress = char
+            i += 1
+            continue
+
+        if text.startswith("ɜɹ", i) or text.startswith("əɹ", i):
+            stressed = pending_stress is not None
+            if pending_stress:
+                result.append(pending_stress)
+                pending_stress = None
+            result.append("ɜɹ" if stressed else "əɹ")
+            i += 2
+            continue
+
+        if text.startswith("ɪd", i) or text.startswith("ɪz", i):
+            if pending_stress:
+                result.append(pending_stress)
+                pending_stress = None
+                result.append(text[i : i + 2])
+            else:
+                result.append(f"ᵻ{text[i + 1]}")
+            i += 2
+            continue
+
+        if char == "ə":
+            if pending_stress:
+                result.append(pending_stress)
+                pending_stress = None
+                result.append("ʌ")
+            else:
+                result.append(char)
+            i += 1
+            continue
+
+        if char == "ᵊ":
+            if pending_stress:
+                result.append(pending_stress)
+                pending_stress = None
+                result.append("ə")
+            else:
+                result.append(char)
+            i += 1
+            continue
+
+        if pending_stress and char in _VOWELS:
+            result.append(pending_stress)
+            pending_stress = None
+        result.append(char)
+        i += 1
+
+    if pending_stress:
+        result.append(pending_stress)
+    return "".join(result)
+
+
 def espeak_ipa_to_misaki(ipa: str, *, british: bool, strategy: str = "espeak") -> str:
     strategy = normalize_strategy(strategy)
     result = ipa
-    if strategy in {"ipa", "ipa-flap"}:
-        result = _apply_ipa_rewrites(result)
+    if strategy in _IPA_STRATEGIES:
+        rewrites = _IPA_REWRITES_VOWEL if strategy in _VOWEL_TUNED_STRATEGIES else _IPA_REWRITES_BASE
+        result = _apply_ipa_rewrites(result, rewrites)
     result = result.replace("\u0361", "^")
     for old, new in _FROM_ESPEAKS:
         result = result.replace(old, new)
@@ -149,7 +247,9 @@ def espeak_ipa_to_misaki(ipa: str, *, british: bool, strategy: str = "espeak") -
         result = result.replace("ɪə", "iə")
         result = result.replace("ː", "")
     result = result.replace("^", "")
-    if strategy == "ipa-flap":
+    if strategy in _VOWEL_TUNED_STRATEGIES:
+        result = _apply_vowel_tuning(result)
+    if strategy in _FLAP_STRATEGIES:
         result = _apply_flap(result)
     return result
 

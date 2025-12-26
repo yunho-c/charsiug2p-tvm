@@ -670,7 +670,7 @@ def analyze_misaki(
     strategies: list[str] | None = typer.Option(
         None,
         "--strategy",
-        help="Mapping strategy (espeak, ipa, ipa-flap). Repeatable or comma-separated.",
+        help="Mapping strategy (espeak, ipa, ipa-flap, ipa-vowel, ipa-flap-vowel). Repeatable or comma-separated.",
     ),
     limit: int | None = typer.Option(None, help="Limit number of words evaluated."),
     shuffle: bool = typer.Option(False, help="Shuffle word list before limiting."),
