@@ -11,7 +11,8 @@ Flutter Rust Bridge bindings for charsiug2p TVM runtime.
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/**/*'
   s.dependency 'Flutter'
-  s.platform         = :ios, '12.0'
+  s.dependency 'tvm_runtime_flutter'  # Shared TVM runtime
+  s.platform         = :ios, '14.0'
   s.swift_version    = '5.0'
   s.script_phase = {
     :name => 'Build Rust library',
@@ -23,6 +24,9 @@ Flutter Rust Bridge bindings for charsiug2p TVM runtime.
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
-    'OTHER_LDFLAGS' => '-force_load ${BUILT_PRODUCTS_DIR}/libcharsiug2p_g2p_ffi.a -force_load ${PODS_TARGET_SRCROOT}/../assets/metal-ios/libtvm_runtime.a -force_load ${PODS_TARGET_SRCROOT}/../assets/metal-ios/libg2p_system_lib.a -framework Metal -framework Foundation -framework MetalPerformanceShaders',
+    # Only link model-specific system lib; TVM runtime is provided by tvm_runtime_flutter
+    'OTHER_LDFLAGS' => '-force_load ${BUILT_PRODUCTS_DIR}/libcharsiug2p_g2p_ffi.a ' +
+                       '-force_load ${PODS_TARGET_SRCROOT}/../assets/metal-ios/libg2p_system_lib.a',
   }
 end
+
