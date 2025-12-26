@@ -679,7 +679,8 @@ def analyze_misaki(
         help=(
             "Mapping strategy (espeak, ipa, ipa-flap, ipa-vowel, ipa-flap-vowel, "
             "ipa-vowel-stress, ipa-flap-vowel-stress, ipa-vowel-syllabic, "
-            "ipa-flap-vowel-syllabic, ipa-vowel-reduced, ipa-flap-vowel-reduced). "
+            "ipa-flap-vowel-syllabic, ipa-vowel-reduced, ipa-flap-vowel-reduced, "
+            "ipa-vowel-reduced-rhotic, ipa-flap-vowel-reduced-rhotic). "
             "Repeatable or comma-separated. Recommended: ipa-flap-vowel-reduced."
         ),
     ),
@@ -775,6 +776,8 @@ def analyze_misaki(
         "ipa-flap-vowel-prefix",
         "ipa-vowel-syllabic",
         "ipa-flap-vowel-syllabic",
+        "ipa-vowel-reduced-rhotic",
+        "ipa-flap-vowel-reduced-rhotic",
     }
     if experimental_strategies.intersection(parsed_strategies):
         console.print("[yellow]Warning:[/yellow] experimental strategies are in use.")

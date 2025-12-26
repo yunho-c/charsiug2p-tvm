@@ -12,6 +12,8 @@ SUPPORTED_STRATEGIES = {
     "ipa-flap-vowel-syllabic",
     "ipa-vowel-reduced",
     "ipa-flap-vowel-reduced",
+    "ipa-vowel-reduced-rhotic",
+    "ipa-flap-vowel-reduced-rhotic",
     "ipa-vowel-prefix",
     "ipa-flap-vowel-prefix",
 }
@@ -131,6 +133,8 @@ _IPA_STRATEGIES = {
     "ipa-flap-vowel-syllabic",
     "ipa-vowel-reduced",
     "ipa-flap-vowel-reduced",
+    "ipa-vowel-reduced-rhotic",
+    "ipa-flap-vowel-reduced-rhotic",
     "ipa-vowel-prefix",
     "ipa-flap-vowel-prefix",
 }
@@ -143,12 +147,18 @@ _VOWEL_TUNED_STRATEGIES = {
     "ipa-flap-vowel-syllabic",
     "ipa-vowel-reduced",
     "ipa-flap-vowel-reduced",
+    "ipa-vowel-reduced-rhotic",
+    "ipa-flap-vowel-reduced-rhotic",
     "ipa-vowel-prefix",
     "ipa-flap-vowel-prefix",
 }
 _STRESS_TUNED_STRATEGIES = {"ipa-vowel-stress", "ipa-flap-vowel-stress"}
 _SYLLABIC_TUNED_STRATEGIES = {"ipa-vowel-syllabic", "ipa-flap-vowel-syllabic"}
 _REDUCED_TUNED_STRATEGIES = {"ipa-vowel-reduced", "ipa-flap-vowel-reduced"}
+_RHOTIC_TUNED_STRATEGIES = {
+    "ipa-vowel-reduced-rhotic",
+    "ipa-flap-vowel-reduced-rhotic",
+}
 _PREFIX_STRESS_STRATEGIES = {"ipa-vowel-prefix", "ipa-flap-vowel-prefix"}
 _FLAP_STRATEGIES = {
     "ipa-flap",
@@ -156,6 +166,7 @@ _FLAP_STRATEGIES = {
     "ipa-flap-vowel-stress",
     "ipa-flap-vowel-syllabic",
     "ipa-flap-vowel-reduced",
+    "ipa-flap-vowel-reduced-rhotic",
 }
 _STRESS_MARKERS = {"ˈ", "ˌ"}
 _STRESS_TOKEN_UNITS = ["ᵊl", "ᵊn", "ᵊm", "ɜɹ", "əɹ"]
@@ -205,12 +216,15 @@ def normalize_strategy(strategy: str) -> str:
         has_prefix = "prefix" in parts or "pref" in parts
         has_syllabic = "syllabic" in parts or "schwa" in parts
         has_reduced = "reduced" in parts or "reduce" in parts
+        has_rhotic = "rhotic" in parts
         if has_prefix:
             has_vowel = True
         if has_syllabic:
             has_vowel = True
         if has_reduced:
             has_vowel = True
+        if has_rhotic:
+            has_reduced = True
         if has_flap and has_vowel and has_stress:
             normalized = "ipa-flap-vowel-stress"
         elif has_vowel and has_stress:
@@ -219,6 +233,10 @@ def normalize_strategy(strategy: str) -> str:
             normalized = "ipa-flap-vowel-syllabic"
         elif has_syllabic:
             normalized = "ipa-vowel-syllabic"
+        elif has_flap and has_rhotic:
+            normalized = "ipa-flap-vowel-reduced-rhotic"
+        elif has_rhotic:
+            normalized = "ipa-vowel-reduced-rhotic"
         elif has_flap and has_reduced:
             normalized = "ipa-flap-vowel-reduced"
         elif has_reduced:
@@ -493,6 +511,28 @@ def _apply_reduced_vowel_tuning(text: str) -> str:
     return "".join(result)
 
 
+def _apply_rhotic_tuning(text: str) -> str:
+    tokens = _tokenize_for_stress(text)
+    result: list[str] = []
+    for idx, token in enumerate(tokens):
+        if token == "ɹ":
+            prev_token = None
+            for j in range(idx - 1, -1, -1):
+                if tokens[j] not in _STRESS_MARKERS:
+                    prev_token = tokens[j]
+                    break
+            next_token = None
+            for j in range(idx + 1, len(tokens)):
+                if tokens[j] not in _STRESS_MARKERS:
+                    next_token = tokens[j]
+                    break
+            if prev_token in {"I", "W"} and (next_token is None or next_token not in _VOWELS):
+                result.append("əɹ")
+                continue
+        result.append(token)
+    return "".join(result)
+
+
 def espeak_ipa_to_misaki(ipa: str, *, british: bool, strategy: str = "espeak", word: str | None = None) -> str:
     strategy = normalize_strategy(strategy)
     result = ipa
@@ -523,6 +563,8 @@ def espeak_ipa_to_misaki(ipa: str, *, british: bool, strategy: str = "espeak", w
         result = _apply_syllabic_tuning(result)
     if strategy in _REDUCED_TUNED_STRATEGIES:
         result = _apply_reduced_vowel_tuning(result)
+    if strategy in _RHOTIC_TUNED_STRATEGIES:
+        result = _apply_rhotic_tuning(result)
     if strategy in _PREFIX_STRESS_STRATEGIES:
         result = _apply_prefix_stress_rules(result, word)
     if strategy in _STRESS_TUNED_STRATEGIES:

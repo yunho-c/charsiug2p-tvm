@@ -31,6 +31,8 @@ This note captures what we learned while mapping CharsiuG2P IPA output into Misa
 - `ipa-flap-vowel-syllabic` (experimental): Combines `ipa-vowel-syllabic` with the flapping heuristic.
 - `ipa-vowel-reduced`: Adds a conservative pretonic reduction rule (`ɪ → ə`) in consonant contexts when a primary stress appears later in the word.
 - `ipa-flap-vowel-reduced`: Combines `ipa-vowel-reduced` with the flapping heuristic. This is currently the best-performing strategy (English) and is recommended for comparisons.
+- `ipa-vowel-reduced-rhotic` (experimental): Adds a rhotic expansion rule (`ɹ → əɹ`) when `ɹ` follows a vowel token, targeting cases where Misaki expects `əɹ` but the mapped output emits a bare `ɹ`.
+- `ipa-flap-vowel-reduced-rhotic` (experimental): Combines `ipa-vowel-reduced-rhotic` with the flapping heuristic.
 
 ## Implementation pointers
 
