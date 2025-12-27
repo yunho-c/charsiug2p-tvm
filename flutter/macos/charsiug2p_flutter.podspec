@@ -12,7 +12,7 @@ Flutter Rust Bridge bindings for charsiug2p-tvm.
   s.source_files     = 'Classes/**/*'
   s.dependency 'FlutterMacOS'
   s.dependency 'tvm_flutter'
-  s.platform         = :osx, '12.0'
+  s.platform         = :osx, '10.15'
   s.swift_version    = '5.0'
   s.script_phase = {
     :name => 'Build Rust library',
