@@ -1,17 +1,17 @@
 Pod::Spec.new do |s|
   s.name             = 'charsiug2p_flutter'
   s.version          = '0.1.0'
-  s.summary          = 'Flutter Rust Bridge bindings for charsiug2p TVM runtime.'
+  s.summary          = 'Flutter Rust Bridge bindings for charsiug2p-tvm.'
   s.description      = <<-DESC
-Flutter Rust Bridge bindings for charsiug2p TVM runtime.
+Flutter Rust Bridge bindings for charsiug2p-tvm.
                        DESC
-  s.homepage         = 'https://example.com'
+  s.homepage         = 'https://github.com/yunho-c/charsiug2p-tvm'
   s.license          = { :file => '../LICENSE' }
-  s.author           = { 'charsiug2p' => 'noreply@example.com' }
+  s.author           = { 'charsiug2p' => 'opensource@yunhocho.com' }
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/**/*'
   s.dependency 'Flutter'
-  s.dependency 'tvm_runtime_flutter'  # Shared TVM runtime
+  s.dependency 'tvm_flutter'  # provides libtvm_runtime & libtvm_ffi
   s.platform         = :ios, '14.0'
   s.swift_version    = '5.0'
   s.script_phase = {
@@ -24,7 +24,7 @@ Flutter Rust Bridge bindings for charsiug2p TVM runtime.
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
-    # Only link model-specific system lib; TVM runtime is provided by tvm_runtime_flutter
+    # Link system lib containing compiled TVM models
     'OTHER_LDFLAGS' => '-force_load ${BUILT_PRODUCTS_DIR}/libcharsiug2p_g2p_ffi.a ' +
                        '-force_load ${PODS_TARGET_SRCROOT}/../assets/metal-ios/libg2p_system_lib.a',
   }
